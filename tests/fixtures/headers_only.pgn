@@ -1,0 +1,17 @@
+[Event "Header Only Game"]
+[Site "?"]
+[Date "????.??.??"]
+[Round "?"]
+[White "NoMoves"]
+[Black "AtAll"]
+[Result "*"]
+
+[Event "Normal After"]
+[Site "?"]
+[Date "????.??.??"]
+[Round "?"]
+[White "Has"]
+[Black "Moves"]
+[Result "*"]
+
+1. c4 e5 *

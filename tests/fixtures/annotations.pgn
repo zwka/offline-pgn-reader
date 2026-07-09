@@ -1,0 +1,12 @@
+[Event "Annotated"]
+[Site "?"]
+[Date "????.??.??"]
+[Round "?"]
+[White "Annotator"]
+[Black "Reader"]
+[Result "*"]
+
+{Pre-game introduction comment.} 1. e4! {Best by test.} e5?! $13 2. Nf3 $1 $14
+{A comment
+spanning two lines.} Nc6 ; a semicolon comment to end of line
+3. Bb5 a6 $2 4. Ba4 $6 *

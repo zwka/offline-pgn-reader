@@ -1,0 +1,29 @@
+[Event "Good One"]
+[Site "?"]
+[Date "????.??.??"]
+[Round "?"]
+[White "First"]
+[Black "Fine"]
+[Result "1-0"]
+
+1. e4 e5 2. Nf3 1-0
+
+[Event "Broken"]
+[Site "?"]
+[Date "????.??.??"]
+[Round "?"]
+[White "Second"]
+[Black "Bad"]
+[Result "*"]
+
+1. e4 e5 2. Zz9 xx7 3. Qq0 *
+
+[Event "Good Two"]
+[Site "?"]
+[Date "????.??.??"]
+[Round "?"]
+[White "Third"]
+[Black "Fine"]
+[Result "0-1"]
+
+1. d4 Nf6 2. c4 e6 0-1

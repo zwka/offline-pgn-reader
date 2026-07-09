@@ -1,0 +1,11 @@
+%This is an escape line and must be ignored
+[Event "Escaped"]
+[Site "?"]
+[Date "????.??.??"]
+[Round "?"]
+[White "Percent"]
+[Black "Line"]
+[Result "*"]
+
+%another escape line inside the game area
+1. e4 c5 *

@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Offline PGN Reader</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%E2%99%9E%3C/text%3E%3C/svg%3E">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="#/library">♞ PGN Reader</a>
+    <nav id="breadcrumb" class="breadcrumb"></nav>
+    <div class="topbar-right">
+      <span id="health-dot" class="health-dot" title="backend status"></span>
+      <button id="help-btn" class="ghost-btn" title="Keyboard shortcuts">?</button>
+    </div>
+  </header>
+
+  <main id="app" class="app"></main>
+
+  <div id="help-overlay" class="overlay hidden">
+    <div class="overlay-card">
+      <h3>Keyboard shortcuts</h3>
+      <table class="keys">
+        <tr><td><kbd>→</kbd> / <kbd>←</kbd></td><td>next / previous move in current line</td></tr>
+        <tr><td><kbd>↓</kbd> / <kbd>↑</kbd></td><td>cycle sibling variations at this move</td></tr>
+        <tr><td><kbd>Home</kbd> / <kbd>End</kbd></td><td>start / end of current line</td></tr>
+        <tr><td><kbd>]</kbd> / <kbd>[</kbd></td><td>next / previous game in file</td></tr>
+        <tr><td><kbd>f</kbd></td><td>flip board</td></tr>
+        <tr><td><kbd>p</kbd></td><td>toggle raw PGN source</td></tr>
+        <tr><td><kbd>Esc</kbd></td><td>close this help</td></tr>
+      </table>
+      <button class="ghost-btn" onclick="document.getElementById('help-overlay').classList.add('hidden')">Close</button>
+    </div>
+  </div>
+
+  <script type="module" src="/static/app.js"></script>
+</body>
+</html>

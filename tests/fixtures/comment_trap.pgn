@@ -1,0 +1,21 @@
+[Event "Trap A"]
+[Site "?"]
+[Date "????.??.??"]
+[Round "?"]
+[White "Comment"]
+[Black "Trap"]
+[Result "*"]
+
+1. e4 {This comment spans lines and contains a fake tag:
+[Event "NOT A REAL GAME"]
+and continues after it.} e5 2. Nf3 *
+
+[Event "Trap B"]
+[Site "?"]
+[Date "????.??.??"]
+[Round "?"]
+[White "After"]
+[Black "Trap"]
+[Result "*"]
+
+1. d4 {ends} *

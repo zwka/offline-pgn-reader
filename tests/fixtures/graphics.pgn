@@ -1,0 +1,11 @@
+[Event "Graphics"]
+[Site "?"]
+[Date "????.??.??"]
+[Round "?"]
+[White "Arrows"]
+[Black "Highlights"]
+[Result "*"]
+
+{Intro with shapes. [%csl Gd4,Re5] [%cal Gd2d4]} 1. e4 {King's pawn.
+[%cal Ge2e4,Rd7d5] [%csl Ye4]} e5 (1... c5 {[%csl Bc5]} 2. Nf3
+({pre-move shapes} {[%cal Yg1f3]} 2. c3 d5)) 2. Nf3 {no shapes here} Nc6 *

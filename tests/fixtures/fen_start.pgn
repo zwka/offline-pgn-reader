@@ -1,0 +1,11 @@
+[Event "Endgame Study"]
+[Site "?"]
+[Date "????.??.??"]
+[Round "?"]
+[White "Lucena"]
+[Black "Position"]
+[Result "1-0"]
+[SetUp "1"]
+[FEN "1k6/1P3R2/8/8/8/8/r7/2K5 w - - 0 1"]
+
+1. Rf8+ Ka7 2. Rf7 Ka6 3. Kb1 1-0
