@@ -1,3 +1,4 @@
+import { homedir } from "node:os";
 import { isAbsolute, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -22,7 +23,14 @@ function readPort(raw: string | undefined): number {
 }
 
 function resolveConfiguredPath(raw: string | undefined, fallback: string): string {
-  return raw ? (isAbsolute(raw) ? raw : resolve(projectRoot, raw)) : fallback;
+  if (!raw) return fallback;
+
+  const expanded = raw === "~"
+    ? homedir()
+    : raw.startsWith("~/")
+      ? resolve(homedir(), raw.slice(2))
+      : raw;
+  return isAbsolute(expanded) ? expanded : resolve(projectRoot, expanded);
 }
 
 export function readConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {

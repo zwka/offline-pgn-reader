@@ -1,13 +1,22 @@
 import fastifyStatic from "@fastify/static";
+import { Value } from "@sinclair/typebox/value";
 import Fastify, { type FastifyInstance } from "fastify";
 
 import { config as defaultConfig, type AppConfig } from "./config.js";
 import { createSqliteProbe } from "./database.js";
-import { HealthResponseSchema } from "./wire.js";
+import {
+  ErrorResponseSchema,
+  HealthResponseSchema,
+  type ErrorResponse,
+} from "./wire.js";
 
 export type ServerOptions = Partial<AppConfig> & {
   databaseProbe?: () => boolean | Promise<boolean>;
 };
+
+function errorResponse(detail: string): ErrorResponse {
+  return Value.Parse(ErrorResponseSchema, { detail });
+}
 
 export function buildServer(options: ServerOptions = {}): FastifyInstance {
   const { databaseProbe, ...configOverrides } = options;
@@ -46,9 +55,9 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     },
   );
 
-  app.setNotFoundHandler(async (_request, reply) => {
-    return reply.code(404).send({ detail: "Not Found" });
-  });
+  app.setNotFoundHandler(async (_request, reply) =>
+    reply.code(404).send(errorResponse("Not Found")),
+  );
 
   app.setErrorHandler(async (error, _request, reply) => {
     const statusCode =
@@ -65,7 +74,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
         : error instanceof Error
           ? error.message
           : "Request failed";
-    return reply.code(statusCode).send({ detail });
+    return reply.code(statusCode).send(errorResponse(detail));
   });
 
   return app;

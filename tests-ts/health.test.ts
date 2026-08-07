@@ -65,6 +65,21 @@ describe("Node application public seams", () => {
     expect(body).toEqual(fixture.notFound);
   });
 
+  it("returns the shared error envelope for a server failure", async () => {
+    const server = testServer();
+    server.get("/api/failure", async () => {
+      throw new Error("boom");
+    });
+    servers.push(server);
+
+    const response = await server.inject({ method: "GET", url: "/api/failure" });
+    const body = response.json();
+
+    expect(response.statusCode).toBe(500);
+    expect(Value.Check(ErrorResponseSchema, body)).toBe(true);
+    expect(body).toEqual({ detail: "Internal Server Error" });
+  });
+
   it("reports a degraded health response when the database probe fails", async () => {
     const server = testServer({ databaseProbe: () => false });
     servers.push(server);

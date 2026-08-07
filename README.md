@@ -1,11 +1,12 @@
 # Offline PGN Reader
 
-A fully offline PGN reader and study interface: Python backend + browser UI,
-built for reading large, heavily annotated PGN files (Chessable-style course
-exports, game collections, opening files) on a normal laptop. No cloud, no
-SaaS, no external assets — everything runs from this folder.
+A fully offline PGN reader and study interface: Node.js/TypeScript runtime +
+browser UI, built for reading large, heavily annotated PGN files (Chessable-style
+course exports, game collections, opening files) on a normal laptop. The Python
+runtime remains available as a rollback path and test oracle. No cloud, no SaaS,
+no external assets — everything runs from this folder.
 
-![stack](https://img.shields.io/badge/stack-FastAPI%20%2B%20SQLite%20%2B%20vanilla%20JS-334) 
+![stack](https://img.shields.io/badge/stack-Node%2FTypeScript%20%2B%20SQLite%20%2B%20vanilla%20JS-334)
 
 ## Features
 
@@ -38,6 +39,13 @@ SaaS, no external assets — everything runs from this folder.
 
 ```bash
 cd offline-pgn-reader
+nvm use
+npm install
+```
+
+The Python rollback runtime and oracle are optional:
+
+```bash
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 ```
@@ -45,11 +53,6 @@ python3 -m venv .venv
 Everything after this point is fully offline.
 
 ## Run
-
-```bash
-.venv/bin/python -m pgnreader serve
-# → http://127.0.0.1:8642  (open in Brave)
-```
 
 The TypeScript runtime uses Node.js `24.11.1` and npm `11.6.0` (see
 `.nvmrc` and `package.json`). Install its dependencies and start the same
@@ -59,6 +62,12 @@ local address with:
 npm install
 npm run dev
 # → http://127.0.0.1:8642
+```
+
+The Python rollback runtime remains available at the same address:
+
+```bash
+.venv/bin/python -m pgnreader serve
 ```
 
 TypeScript checks and browser verification are available alongside the Python
