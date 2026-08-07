@@ -51,6 +51,29 @@ Everything after this point is fully offline.
 # → http://127.0.0.1:8642  (open in Brave)
 ```
 
+The TypeScript runtime uses Node.js `24.11.1` and npm `11.6.0` (see
+`.nvmrc` and `package.json`). Install its dependencies and start the same
+local address with:
+
+```bash
+npm install
+npm run dev
+# → http://127.0.0.1:8642
+```
+
+TypeScript checks and browser verification are available alongside the Python
+oracle. Install the Playwright browser once before the smoke test:
+
+```bash
+npm run typecheck
+npm test
+npx playwright install chromium
+npm run test:browser
+npm run test:python
+```
+
+`npm run test:all` runs those checks in one command.
+
 Files in `samples/` and `library/` are auto-discovered on the Library page —
 one click indexes them. You can also paste any absolute path, or upload a
 copy (stored in `library/`).
