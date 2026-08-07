@@ -166,6 +166,18 @@ describe("PGN source scanner", () => {
     expect(games[0].offsetEnd).toBe(readFileSync(path).byteLength - 1);
   });
 
+  it("keeps a large valid tag value in the ordered headers", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "offline-pgn-reader-scanner-"));
+    temporaryDirectories.push(directory);
+    const path = join(directory, "long-tag.pgn");
+    const event = "x".repeat(70_000);
+    writeFileSync(path, `[Event "${event}"]\n\n1. e4 *\n`);
+
+    const games = await scan(path);
+    expect(games).toHaveLength(1);
+    expect(games[0].headers[0]).toEqual(["Event", event]);
+  });
+
   it("reports final progress and fingerprints source changes", async () => {
     const path = join(fixtureDirectory, "basic_two_games.pgn");
     const progress: Array<[number, number, number]> = [];

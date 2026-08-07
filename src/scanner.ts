@@ -9,7 +9,7 @@ import { createHash } from "node:crypto";
 
 const BOM = Buffer.from([0xef, 0xbb, 0xbf]);
 const DEFAULT_PROGRESS_BYTES = 4 * 1024 * 1024;
-const MAX_TAG_LINE_BYTES = 64 * 1024;
+const MAX_LINE_PREVIEW_BYTES = 64 * 1024;
 
 export type TagPair = [name: string, value: string];
 
@@ -43,7 +43,9 @@ export async function* scanPgn(
   let linePreviousByte = -1;
   let lineLastByte = -1;
   let linePreview: number[] = [];
-  let lineTooLong = false;
+  let linePreviewTruncated = false;
+  let lineHasNonWhitespace = false;
+  let lineMayBeTag = false;
   let lineCommentAtStart = false;
   let lineCommentState = false;
   let lineStoppedAtSemicolon = false;
@@ -63,17 +65,19 @@ export async function* scanPgn(
     linePreviousByte = -1;
     lineLastByte = -1;
     linePreview = [];
-    lineTooLong = false;
+    linePreviewTruncated = false;
+    lineHasNonWhitespace = false;
+    lineMayBeTag = false;
     lineCommentAtStart = inComment;
     lineCommentState = inComment;
     lineStoppedAtSemicolon = false;
   };
 
   const processLine = (): ScannedGame | null => {
-    const text = lineTooLong
+    const text = linePreviewTruncated
       ? ""
       : Buffer.from(linePreview).toString("utf8").replace(/[\r\n]+$/g, "");
-    const blank = !lineTooLong && text.trim().length === 0;
+    const blank = !lineHasNonWhitespace || (!linePreviewTruncated && text.trim().length === 0);
 
     if (blank) {
       if (current && current.headers.length > 0 && !hasMovetext) blankAfterTags = true;
@@ -81,7 +85,7 @@ export async function* scanPgn(
     }
 
     let completed: ScannedGame | null = null;
-    const tag = lineCommentAtStart || lineTooLong ? null : parseTag(text);
+    const tag = lineCommentAtStart || !lineMayBeTag || linePreviewTruncated ? null : parseTag(text);
     if (tag) {
       if (current && (hasMovetext || (blankAfterTags && tag[0] === "Event"))) {
         const done = closeCurrent();
@@ -145,9 +149,13 @@ export async function* scanPgn(
       linePreviousByte = lineLastByte;
       lineLastByte = byte;
       if (lineFirstByte === null) lineFirstByte = byte;
-      if (!lineTooLong) {
-        if (linePreview.length < MAX_TAG_LINE_BYTES) linePreview.push(byte);
-        else lineTooLong = true;
+      if (!lineHasNonWhitespace && !isAsciiWhitespace(byte)) {
+        lineHasNonWhitespace = true;
+        lineMayBeTag = !lineCommentAtStart && byte === 0x5b;
+      }
+      if (!linePreviewTruncated) {
+        if (lineMayBeTag || linePreview.length < MAX_LINE_PREVIEW_BYTES) linePreview.push(byte);
+        else linePreviewTruncated = true;
       }
       if (!lineStoppedAtSemicolon) {
         if (lineCommentState) {
@@ -252,6 +260,10 @@ function parseTag(text: string): TagPair | null {
 
 function unescapeTagValue(value: string): string {
   return value.replaceAll('\\"', '"').replaceAll("\\\\", "\\");
+}
+
+function isAsciiWhitespace(byte: number): boolean {
+  return byte === 0x09 || byte === 0x0b || byte === 0x0c || byte === 0x0d || byte === 0x20;
 }
 
 function trailingNewlineLength(previousByte: number, lastByte: number): number {
