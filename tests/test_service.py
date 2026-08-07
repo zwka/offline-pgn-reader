@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import json
 import os
+import time
 
 import pytest
 
-from pgnreader.service import NotFound, ServiceError
+import pgnreader.service as service_module
+from pgnreader.db import Database
+from pgnreader.service import LibraryService, NotFound, ServiceError
 
 from .conftest import FIXTURES
 
@@ -50,6 +53,20 @@ def test_unchanged_file_skips_rescan(service, fixture_copy):
     assert info2["scanned_at"] == first_scan_time
 
 
+def test_duplicate_background_scan_requests_return_false(service, fixture_copy):
+    p = fixture_copy("basic_two_games.pgn")
+    info = service.register_file(p, scan=False)
+
+    assert service.start_scan(info["id"]) is True
+    assert service.start_scan(info["id"]) is False
+    deadline = time.time() + 10
+    while time.time() < deadline:
+        if service.get_file(info["id"])["scan_status"] in {"ready", "error"}:
+            break
+        time.sleep(0.01)
+    assert service.get_file(info["id"])["scan_status"] == "ready"
+
+
 def test_changed_file_marked_stale_and_rescan_updates(service, fixture_copy):
     p = fixture_copy("basic_two_games.pgn")
     info = register_and_scan(service, p)
@@ -68,6 +85,69 @@ def test_changed_file_marked_stale_and_rescan_updates(service, fixture_copy):
     assert info2["stale"] is False
     games = service.list_games(info["id"])["games"]
     assert games[-1]["white"] == "New"
+
+
+def test_stale_source_reads_are_blocked_until_rescan(service, fixture_copy):
+    p = fixture_copy("basic_two_games.pgn")
+    info = register_and_scan(service, p)
+    game_id = service.list_games(info["id"])["games"][0]["id"]
+
+    with p.open("ab") as f:
+        f.write(b"\n")
+    os.utime(p)
+
+    with pytest.raises(ServiceError, match="changed") as document_error:
+        service.get_game_document(game_id)
+    assert document_error.value.status == 409
+    with pytest.raises(ServiceError, match="changed") as source_error:
+        service.get_game_source(game_id)
+    assert source_error.value.status == 409
+
+
+def test_changed_source_during_replacement_keeps_previous_index_and_blocks_reads(
+    service, fixture_copy, monkeypatch
+):
+    p = fixture_copy("basic_two_games.pgn")
+    info = register_and_scan(service, p)
+    before = service.list_games(info["id"])["games"]
+    original_scan_pgn = service_module.scan_pgn
+
+    def mutate_after_first_game(path, progress=None):
+        games = original_scan_pgn(path, progress=progress)
+        yield next(games)
+        path.write_bytes(path.read_bytes() + b'\n[Event "Changed"]\n\n1. d4 *\n')
+        yield from games
+
+    monkeypatch.setattr(service_module, "scan_pgn", mutate_after_first_game)
+    failed = service.scan_file_sync(info["id"], force=True)
+
+    assert failed["scan_status"] == "error"
+    assert "source changed during scan" in failed["scan_error"]
+    after = service.list_games(info["id"])["games"]
+    assert [(row["id"], row["idx_in_file"], row["event"], row["byte_size"]) for row in after] == [
+        (row["id"], row["idx_in_file"], row["event"], row["byte_size"]) for row in before
+    ]
+    with pytest.raises(ServiceError, match="ready") as document_error:
+        service.get_game_document(before[0]["id"])
+    assert document_error.value.status == 409
+    with pytest.raises(ServiceError, match="ready") as source_error:
+        service.get_game_source(before[0]["id"])
+    assert source_error.value.status == 409
+
+
+def test_interrupted_scan_recovers_as_pending(db: Database, settings, fixture_copy):
+    p = fixture_copy("basic_two_games.pgn")
+    service = LibraryService(db, settings)
+    info = service.register_file(p, scan=False)
+    with db.connect() as connection:
+        connection.execute("UPDATE files SET scan_status='scanning' WHERE id=?", (info["id"],))
+
+    recovered = LibraryService(db, settings)
+    pending = recovered.get_file(info["id"])
+
+    assert pending["scan_status"] == "pending"
+    assert pending["progress"] is None
+    assert recovered.scan_file_sync(info["id"])["scan_status"] == "ready"
 
 
 def test_list_games_filter_and_paging(service, large_pgn):

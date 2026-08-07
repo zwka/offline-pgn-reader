@@ -57,6 +57,14 @@ class LibraryService:
         self._progress: dict[int, ScanProgress] = {}
         self._active_scans: set[int] = set()
         self._lock = threading.Lock()
+        self._recover_interrupted_scans()
+
+    def _recover_interrupted_scans(self) -> None:
+        with self.db.connect() as conn:
+            conn.execute(
+                "UPDATE files SET scan_status='pending', scan_error=NULL "
+                "WHERE scan_status='scanning'"
+            )
 
     # ------------------------------------------------------------- files
 
@@ -142,8 +150,10 @@ class LibraryService:
         d["exists"] = p.is_file()
         d["stale"] = False
         if d["exists"] and d["scan_status"] == "ready":
-            st = p.stat()
-            d["stale"] = st.st_size != d["size"] or st.st_mtime_ns != d["mtime_ns"]
+            try:
+                d["stale"] = fingerprint_file(p) != d["fingerprint"]
+            except OSError:
+                d["stale"] = True
         prog = self._progress.get(d["id"])
         if prog and d["scan_status"] == "scanning":
             d["progress"] = {
@@ -159,21 +169,53 @@ class LibraryService:
 
     def start_scan(self, file_id: int, force: bool = False) -> bool:
         """Kick off a background scan. Returns False if one is already running."""
-        self.get_file(file_id)  # 404 if unknown
+        info = self.get_file(file_id)  # 404 if unknown
         with self._lock:
             if file_id in self._active_scans:
                 return False
+            if info["scan_status"] == "scanning":
+                return False
+            path = Path(info["path"])
+            if not path.is_file():
+                raise ServiceError(f"source file missing: {path}", status=409)
+            if not force and info["scan_status"] == "ready":
+                try:
+                    if fingerprint_file(path) == info["fingerprint"]:
+                        return False
+                except OSError:
+                    raise ServiceError(f"source file missing: {path}", status=409)
+            with self.db.connect() as conn:
+                claimed = conn.execute(
+                    "UPDATE files SET scan_status='scanning', scan_error=NULL "
+                    "WHERE id=? AND scan_status!='scanning'",
+                    (file_id,),
+                )
+                if claimed.rowcount != 1:
+                    return False
             self._active_scans.add(file_id)
         t = threading.Thread(
             target=self._scan_worker, args=(file_id, force), name=f"scan-{file_id}", daemon=True
         )
-        t.start()
+        try:
+            t.start()
+        except Exception:
+            with self._lock:
+                self._active_scans.discard(file_id)
+            with self.db.connect() as conn:
+                conn.execute(
+                    "UPDATE files SET scan_status='error', scan_error=? WHERE id=?",
+                    ("could not start scan", file_id),
+                )
+            raise
         return True
 
     def scan_file_sync(self, file_id: int, force: bool = False) -> dict[str, Any]:
         """Blocking scan (CLI and tests)."""
+        info = self.get_file(file_id)
         with self._lock:
             if file_id in self._active_scans:
+                raise ServiceError("scan already in progress", status=409)
+            if info["scan_status"] == "scanning":
                 raise ServiceError("scan already in progress", status=409)
             self._active_scans.add(file_id)
         self._scan_worker(file_id, force)
@@ -200,8 +242,8 @@ class LibraryService:
         if not path.is_file():
             raise ServiceError(f"source file missing: {path}", status=404)
 
-        fp = fingerprint_file(path)
-        if not force and info["scan_status"] == "ready" and info["fingerprint"] == fp:
+        started_fingerprint = fingerprint_file(path)
+        if not force and info["scan_status"] == "ready" and info["fingerprint"] == started_fingerprint:
             log.info("file #%s unchanged (fingerprint match), skipping scan", file_id)
             return
 
@@ -233,11 +275,29 @@ class LibraryService:
                     batch.clear()
             if batch:
                 self._insert_games(conn, batch)
+            finished_stats = path.stat()
+            finished_fingerprint = fingerprint_file(path)
+            verified_stats = path.stat()
+            verified_fingerprint = fingerprint_file(path)
+            if (
+                started_fingerprint != finished_fingerprint
+                or finished_fingerprint != verified_fingerprint
+                or finished_stats.st_size != verified_stats.st_size
+                or finished_stats.st_mtime_ns != verified_stats.st_mtime_ns
+            ):
+                raise RuntimeError("source changed during scan")
             conn.execute(
                 """UPDATE files SET size=?, mtime_ns=?, fingerprint=?, game_count=?,
                    warning_count=?, scan_status='ready', scan_error=NULL,
                    scanned_at=datetime('now') WHERE id=?""",
-                (st.st_size, st.st_mtime_ns, fp, count, warning_count, file_id),
+                (
+                    verified_stats.st_size,
+                    verified_stats.st_mtime_ns,
+                    verified_fingerprint,
+                    count,
+                    warning_count,
+                    file_id,
+                ),
             )
         log.info(
             "scan of file #%s done: %d games (%d warnings) in %.2fs",
@@ -300,7 +360,8 @@ class LibraryService:
     def _game_row_by_id(self, game_id: int):
         with self.db.connect() as conn:
             row = conn.execute(
-                """SELECT g.*, f.path AS file_path, f.name AS file_name
+                """SELECT g.*, f.path AS file_path, f.name AS file_name,
+                          f.scan_status AS file_scan_status, f.fingerprint AS file_fingerprint
                    FROM games g JOIN files f ON f.id = g.file_id WHERE g.id=?""",
                 (game_id,),
             ).fetchone()
@@ -308,25 +369,39 @@ class LibraryService:
             raise NotFound(f"game {game_id} not found")
         return row
 
-    def get_game_source(self, game_id: int) -> str:
-        row = self._game_row_by_id(game_id)
-        path = Path(row["file_path"])
-        if not path.is_file():
-            raise ServiceError(f"source file missing: {path}", status=409)
+    def _read_game_bytes(self, row) -> bytes:
+        path = self._assert_source_readable(row)
         data = read_game_bytes(
             path, row["offset_start"], row["offset_end"], self.settings.max_game_bytes
         )
+        self._assert_source_readable(row)
+        return data
+
+    def _assert_source_readable(self, row) -> Path:
+        path = Path(row["file_path"])
+        if row["file_scan_status"] != "ready":
+            raise ServiceError(
+                f"source index is not ready for reads: {row['file_scan_status']}", status=409
+            )
+        if not path.is_file():
+            raise ServiceError(f"source file missing: {path}", status=409)
+        try:
+            current_fingerprint = fingerprint_file(path)
+        except OSError:
+            raise ServiceError(f"source file missing: {path}", status=409)
+        if current_fingerprint != row["file_fingerprint"]:
+            raise ServiceError(f"source changed since scan: {path}", status=409)
+        return path
+
+    def get_game_source(self, game_id: int) -> str:
+        row = self._game_row_by_id(game_id)
+        data = self._read_game_bytes(row)
         return data.decode("utf-8", errors="replace")
 
     def get_game_document(self, game_id: int) -> dict[str, Any]:
         row = self._game_row_by_id(game_id)
-        path = Path(row["file_path"])
-        if not path.is_file():
-            raise ServiceError(f"source file missing: {path}", status=409)
         extra = [f"index warning: {row['warning']}"] if row["warning"] else []
-        data = read_game_bytes(
-            path, row["offset_start"], row["offset_end"], self.settings.max_game_bytes
-        )
+        data = self._read_game_bytes(row)
         try:
             doc = hydrate_game(data, extra_warnings=extra)
         except GameParseError as exc:

@@ -93,6 +93,17 @@ export class LibraryService {
     private readonly uploadDir: string,
   ) {
     this.database.initialize();
+    this.recoverInterruptedScans();
+  }
+
+  private recoverInterruptedScans(): void {
+    this.database.withConnection((database) => {
+      database
+        .prepare(
+          "UPDATE files SET scan_status='pending', scan_error=NULL WHERE scan_status='scanning'",
+        )
+        .run();
+    });
   }
 
   registerFile(rawPath: string): FileRecord {
@@ -189,6 +200,7 @@ export class LibraryService {
   startScan(fileId: number, force = false): boolean {
     const file = this.getFile(fileId);
     if (this.activeScans.has(fileId)) return false;
+    if (file.scan_status === "scanning") return false;
 
     if (!force && file.scan_status === "ready") {
       try {
@@ -206,12 +218,17 @@ export class LibraryService {
     }
 
     const progress: ScanProgressState = { bytesDone: 0, bytesTotal, gamesFound: 0 };
-    this.progress.set(fileId, progress);
-    this.database.withConnection((database) => {
-      database
-        .prepare("UPDATE files SET scan_status='scanning', scan_error=NULL WHERE id=?")
+    const claimed = this.database.withConnection((database) => {
+      const result = database
+        .prepare(
+          "UPDATE files SET scan_status='scanning', scan_error=NULL " +
+            "WHERE id=? AND scan_status!='scanning'",
+        )
         .run(fileId);
+      return result.changes === 1;
     });
+    if (!claimed) return false;
+    this.progress.set(fileId, progress);
 
     let worker: Worker;
     try {
@@ -311,9 +328,17 @@ export class LibraryService {
     try {
       const stats = statSync(source.path, { bigint: true });
       exists = stats.isFile();
-      stale = exists && source.scan_status === "ready" && (
-        Number(stats.size) !== source.size || fileMtimeNs(stats.mtimeNs) !== source.mtime_ns
-      );
+      if (exists && source.scan_status === "ready") {
+        stale = Number(stats.size) !== source.size ||
+          fileMtimeNs(stats.mtimeNs) !== source.mtime_ns;
+        if (!stale) {
+          try {
+            stale = fingerprintFile(source.path) !== source.fingerprint;
+          } catch {
+            stale = true;
+          }
+        }
+      }
     } catch {
       // A registered source can disappear after registration; keep its record readable.
     }

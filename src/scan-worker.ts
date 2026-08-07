@@ -70,11 +70,18 @@ async function run(): Promise<void> {
       }
       if (batch.length > 0) insertBatch(insert, batch);
 
+      const finishedStats = fileStats(scanData.sourcePath);
       const finishedFingerprint = fingerprintFile(scanData.sourcePath);
-      if (finishedFingerprint !== startedFingerprint) {
+      const verifiedStats = fileStats(scanData.sourcePath);
+      const verifiedFingerprint = fingerprintFile(scanData.sourcePath);
+      if (
+        startedFingerprint !== finishedFingerprint ||
+        finishedFingerprint !== verifiedFingerprint ||
+        finishedStats.size !== verifiedStats.size ||
+        finishedStats.mtimeNs !== verifiedStats.mtimeNs
+      ) {
         throw new Error("source changed during scan");
       }
-      const finishedStats = fileStats(scanData.sourcePath);
       database
         .prepare(
           `UPDATE files SET size=?, mtime_ns=?, fingerprint=?, game_count=?,
@@ -82,9 +89,9 @@ async function run(): Promise<void> {
              scanned_at=datetime('now') WHERE id=?`,
         )
         .run(
-          finishedStats.size,
-          finishedStats.mtimeNs,
-          finishedFingerprint,
+          verifiedStats.size,
+          verifiedStats.mtimeNs,
+          verifiedFingerprint,
           count,
           warningCount,
           scanData.fileId,

@@ -73,6 +73,7 @@ async function libraryView() {
 
   let pollTimer = null;
   let intakeError = null;
+  const scanActionErrors = new Map();
   let renderedFiles = [];
   let renderedDiscovered = [];
   cleanupCurrentView = () => clearTimeout(pollTimer);
@@ -104,10 +105,18 @@ async function libraryView() {
   }
 
   function fileCard(f) {
-    const status =
-      !f.exists ? "missing" : f.stale ? "stale" : f.scan_status;
+    const status = !f.exists
+      ? "missing"
+      : f.scan_status === "error"
+        ? "error"
+        : f.scan_status === "scanning"
+          ? "scanning"
+          : f.stale
+            ? "stale"
+            : f.scan_status;
     const pct = f.progress && f.progress.bytesTotal
       ? Math.round((100 * f.progress.bytesDone) / f.progress.bytesTotal) : null;
+    const scanActionError = scanActionErrors.get(f.id);
     return h(
       "div",
       { class: "file-card", onclick: () => (location.hash = `#/file/${f.id}`) },
@@ -125,6 +134,7 @@ async function libraryView() {
         ? h("div", { class: "progress-track" }, h("div", { class: "progress-fill", style: `width:${pct}%` }))
         : null,
       f.scan_error ? h("div", { class: "error-text", style: "font-size:12px;margin-top:6px" }, f.scan_error) : null,
+      scanActionError ? h("div", { class: "error-text", role: "alert", style: "font-size:12px;margin-top:6px" }, scanActionError) : null,
       h(
         "div",
         { class: "file-actions" },
@@ -132,8 +142,14 @@ async function libraryView() {
           class: "ghost-btn",
           onclick: async (e) => {
             e.stopPropagation();
-            await api.rescan(f.id);
-            refresh();
+            try {
+              await api.rescan(f.id);
+              scanActionErrors.delete(f.id);
+              await refresh();
+            } catch (err) {
+              scanActionErrors.set(f.id, err instanceof Error ? err.message : String(err));
+              render(renderedFiles, renderedDiscovered);
+            }
           },
         }, f.stale ? "Re-scan (changed)" : "Re-scan"),
         h("button", {

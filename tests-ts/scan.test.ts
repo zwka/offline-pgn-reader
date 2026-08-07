@@ -5,6 +5,8 @@ import { tmpdir } from "node:os";
 import Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
 
+import { LibraryDatabase } from "../src/database.js";
+import { LibraryService } from "../src/library.js";
 import { buildServer } from "../src/server.js";
 
 const servers = [] as ReturnType<typeof buildServer>[];
@@ -36,6 +38,17 @@ async function waitForReady(server: ReturnType<typeof buildServer>, fileId: numb
   do {
     const response = await server.inject({ method: "GET", url: `/api/files/${fileId}` });
     record = response.json();
+    if (record.scan_status === "ready" || record.scan_status === "error") return record;
+    await new Promise((resolveTimer) => setTimeout(resolveTimer, 10));
+  } while (Date.now() < deadline);
+  throw new Error(`scan did not finish: ${JSON.stringify(record)}`);
+}
+
+async function waitForServiceReady(service: LibraryService, fileId: number) {
+  const deadline = Date.now() + 10_000;
+  let record = service.getFile(fileId);
+  do {
+    record = service.getFile(fileId);
     if (record.scan_status === "ready" || record.scan_status === "error") return record;
     await new Promise((resolveTimer) => setTimeout(resolveTimer, 10));
   } while (Date.now() < deadline);
@@ -196,5 +209,139 @@ describe("normal PGN scanning", () => {
     } finally {
       database.close();
     }
+  });
+
+  it("keeps the HTTP force default distinct from the internal skip default", async () => {
+    const { server } = testServer();
+    servers.push(server);
+    const sourcePath = resolve("tests/fixtures/basic_two_games.pgn");
+
+    const registered = await server.inject({
+      method: "POST",
+      url: "/api/files",
+      payload: { path: sourcePath },
+    });
+    const fileId = registered.json().id;
+    await waitForReady(server, fileId);
+
+    const skipped = await server.inject({
+      method: "POST",
+      url: `/api/files/${fileId}/rescan?force=false`,
+    });
+    expect(skipped.statusCode).toBe(200);
+    expect(skipped.json().scanStarted).toBe(false);
+
+    const forced = await server.inject({
+      method: "POST",
+      url: `/api/files/${fileId}/rescan`,
+    });
+    expect(forced.statusCode).toBe(200);
+    expect(forced.json().scanStarted).toBe(true);
+    expect((await waitForReady(server, fileId)).scan_status).toBe("ready");
+  });
+
+  it("keeps the internal startScan default non-forced", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "offline-pgn-reader-ts-"));
+    testDirectories.push(directory);
+    const service = new LibraryService(
+      new LibraryDatabase(join(directory, "index.sqlite3")),
+      [],
+      join(directory, "library"),
+    );
+    const sourcePath = resolve("tests/fixtures/basic_two_games.pgn");
+
+    try {
+      const registered = service.registerFile(sourcePath);
+      expect((await waitForServiceReady(service, registered.id)).scan_status).toBe("ready");
+      expect(service.startScan(registered.id)).toBe(false);
+      expect(service.startScan(registered.id, true)).toBe(true);
+      expect((await waitForServiceReady(service, registered.id)).scan_status).toBe("ready");
+    } finally {
+      await service.close();
+    }
+  });
+
+  it("recovers an interrupted scan as pending before it can be retried", async () => {
+    const { directory, server } = testServer();
+    servers.push(server);
+    const sourcePath = resolve("tests/fixtures/basic_two_games.pgn");
+    const registered = await server.inject({
+      method: "POST",
+      url: "/api/files",
+      payload: { path: sourcePath },
+    });
+    const fileId = registered.json().id;
+    await waitForReady(server, fileId);
+
+    const database = new Database(join(directory, "index.sqlite3"));
+    try {
+      database.prepare("UPDATE files SET scan_status='scanning' WHERE id=?").run(fileId);
+    } finally {
+      database.close();
+    }
+
+    const oldServerIndex = servers.indexOf(server);
+    await server.close();
+    if (oldServerIndex >= 0) servers.splice(oldServerIndex, 1);
+
+    const restarted = buildServer({
+      dbPath: join(directory, "index.sqlite3"),
+      watchDirs: [],
+      uploadDir: join(directory, "library"),
+    });
+    servers.push(restarted);
+
+    const pending = await restarted.inject({ method: "GET", url: `/api/files/${fileId}` });
+    expect(pending.statusCode).toBe(200);
+    expect(pending.json()).toMatchObject({ scan_status: "pending", progress: null });
+
+    const retry = await restarted.inject({
+      method: "POST",
+      url: `/api/files/${fileId}/rescan?force=false`,
+    });
+    expect(retry.statusCode).toBe(200);
+    expect(retry.json().scanStarted).toBe(true);
+    expect((await waitForReady(restarted, fileId)).scan_status).toBe("ready");
+  });
+
+  it("keeps the previous Index when replacement fails inside its transaction", async () => {
+    const { directory, server } = testServer();
+    servers.push(server);
+    const sourcePath = resolve("tests/fixtures/basic_two_games.pgn");
+    const registered = await server.inject({
+      method: "POST",
+      url: "/api/files",
+      payload: { path: sourcePath },
+    });
+    const fileId = registered.json().id;
+    await waitForReady(server, fileId);
+    const before = await server.inject({ method: "GET", url: `/api/files/${fileId}/games` });
+
+    const database = new Database(join(directory, "index.sqlite3"));
+    try {
+      database.exec(
+        `CREATE TRIGGER reject_replacement BEFORE INSERT ON games
+         WHEN NEW.file_id=${fileId}
+         BEGIN SELECT RAISE(ABORT, 'replacement rejected'); END;`,
+      );
+    } finally {
+      database.close();
+    }
+
+    const rescan = await server.inject({
+      method: "POST",
+      url: `/api/files/${fileId}/rescan`,
+    });
+    expect(rescan.statusCode).toBe(200);
+    expect(rescan.json().scanStarted).toBe(true);
+    const failed = await waitForReady(server, fileId);
+    expect(failed).toMatchObject({
+      scan_status: "error",
+      scan_error: expect.stringContaining("replacement rejected"),
+    });
+
+    const after = await server.inject({ method: "GET", url: `/api/files/${fileId}/games` });
+    expect(after.statusCode).toBe(200);
+    expect(after.json().games).toEqual(before.json().games);
   });
 });

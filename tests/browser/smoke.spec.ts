@@ -1,4 +1,7 @@
 import { expect, test } from "@playwright/test";
+import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 
 test("loads the browser shell and reaches the Node health route", async ({ page }) => {
   await page.goto("/");
@@ -56,4 +59,28 @@ test("uploads a managed copy and refreshes the Library without navigation", asyn
   await expect(card).toBeVisible();
   await expect(card).toContainText("1 games", { timeout: 10_000 });
   await expect(page).toHaveURL(/\/$/);
+});
+
+test("shows a changed source as stale and rescans it from the Library", async ({ page }) => {
+  const directory = mkdtempSync(join(tmpdir(), "offline-pgn-reader-browser-stale-"));
+  const source = join(directory, "changed.pgn");
+  writeFileSync(source, '[Event "Changed"]\n\n1. e4 *\n');
+
+  try {
+    await page.goto("/");
+    await page.locator("#path-input").fill(source);
+    await page.getByRole("button", { name: "Index path" }).click();
+    const card = page.locator(".file-card").filter({ hasText: "changed.pgn" });
+    await expect(card).toContainText("1 games", { timeout: 10_000 });
+
+    appendFileSync(source, "\n");
+    await page.reload();
+    await expect(card.locator(".badge.stale")).toBeVisible();
+    await expect(card.getByRole("button", { name: "Re-scan (changed)" })).toBeVisible();
+
+    await card.getByRole("button", { name: "Re-scan (changed)" }).click();
+    await expect(card.locator(".badge.ready")).toBeVisible({ timeout: 10_000 });
+  } finally {
+    rmSync(directory, { force: true, recursive: true });
+  }
 });

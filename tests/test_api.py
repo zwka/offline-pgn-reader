@@ -50,6 +50,19 @@ def test_register_scan_list_games(client, fixture_copy):
     assert page["games"][0]["white"] == "Alpha, A."
 
 
+def test_rescan_http_default_forces_while_false_preserves_internal_skip(client, fixture_copy):
+    f = register(client, fixture_copy("basic_two_games.pgn"))
+
+    skipped = client.post(f"/api/files/{f['id']}/rescan", params={"force": "false"})
+    assert skipped.status_code == 200
+    assert skipped.json()["scanStarted"] is False
+
+    forced = client.post(f"/api/files/{f['id']}/rescan")
+    assert forced.status_code == 200
+    assert forced.json()["scanStarted"] is True
+    assert wait_ready(client, f["id"])["scan_status"] == "ready"
+
+
 def test_register_missing_path_404(client, tmp_path):
     r = client.post("/api/files", json={"path": str(tmp_path / "ghost.pgn")})
     assert r.status_code == 404
@@ -63,6 +76,21 @@ def test_game_document_and_neighbors(client, fixture_copy):
     assert doc["neighbors"]["next"] == games[1]["id"]
     assert doc["result"] == "1-0"
     assert doc["fileName"].endswith(".pgn")
+
+
+def test_game_document_and_source_reads_reject_a_stale_index(client, fixture_copy):
+    path = fixture_copy("basic_two_games.pgn")
+    file_info = register(client, path)
+    game_id = client.get(f"/api/files/{file_info['id']}/games").json()["games"][0]["id"]
+    path.write_bytes(path.read_bytes() + b"\n")
+
+    document = client.get(f"/api/games/{game_id}")
+    source = client.get(f"/api/games/{game_id}/pgn")
+
+    assert document.status_code == 409
+    assert "changed" in document.json()["detail"]
+    assert source.status_code == 409
+    assert "changed" in source.json()["detail"]
 
 
 def test_raw_pgn_endpoint_round_trip(client, fixture_copy):
