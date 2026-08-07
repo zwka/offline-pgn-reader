@@ -46,7 +46,7 @@ nvm use
 npm install
 ```
 
-Set up the current Python runtime and test oracle:
+Set up the pre-cutover Python runtime and test oracle:
 
 ```bash
 python3 -m venv .venv
@@ -67,7 +67,9 @@ npm run dev
 # → http://127.0.0.1:8642
 ```
 
-The current application runtime remains available at the same address:
+Until the parity gate and release acceptance are complete, the current Python
+application remains the full-reader path at the same address and is retained
+for rollback and oracle validation:
 
 ```bash
 .venv/bin/python -m pgnreader serve
