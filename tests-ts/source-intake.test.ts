@@ -2,9 +2,11 @@ import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSy
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
+import { Value } from "@sinclair/typebox/value";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { buildServer } from "../src/server.js";
+import { FileRecordSchema } from "../src/wire.js";
 
 const servers = [] as ReturnType<typeof buildServer>[];
 const testDirectories: string[] = [];
@@ -16,13 +18,42 @@ afterEach(async () => {
   });
 });
 
-function testServer(watchDirectory: string) {
+function testServer(watchDirectory: string, uploadDir?: string) {
   const directory = mkdtempSync(join(tmpdir(), "offline-pgn-reader-ts-"));
   testDirectories.push(directory);
   return buildServer({
     dbPath: join(directory, "index.sqlite3"),
     watchDirs: [watchDirectory],
+    uploadDir: uploadDir ?? join(directory, "library"),
   });
+}
+
+function multipartUpload(filename: string, content: Buffer, fieldName = "file") {
+  const boundary = "offline-pgn-reader-test-boundary";
+  return {
+    method: "POST" as const,
+    url: "/api/files/upload",
+    headers: { "content-type": `multipart/form-data; boundary=${boundary}` },
+    payload: Buffer.concat([
+      Buffer.from(
+        `--${boundary}\r\n` +
+        `Content-Disposition: form-data; name="${fieldName}"; filename="${filename}"\r\n` +
+        "Content-Type: application/octet-stream\r\n\r\n",
+      ),
+      content,
+      Buffer.from(`\r\n--${boundary}--\r\n`),
+    ]),
+  };
+}
+
+function emptyMultipart() {
+  const boundary = "offline-pgn-reader-test-boundary";
+  return {
+    method: "POST" as const,
+    url: "/api/files/upload",
+    headers: { "content-type": `multipart/form-data; boundary=${boundary}` },
+    payload: Buffer.from(`--${boundary}--\r\n`),
+  };
 }
 
 function sourceFixture(directory: string) {
@@ -142,5 +173,78 @@ describe("PGN source intake", () => {
 
     expect(response.statusCode).toBe(400);
     expect(response.json().detail).toContain("must be string");
+  });
+
+  it("uploads source bytes into the managed Library and returns a pending FileRecord", async () => {
+    const watchDirectory = mkdtempSync(join(tmpdir(), "offline-pgn-reader-watch-"));
+    const uploadDirectory = mkdtempSync(join(tmpdir(), "offline-pgn-reader-upload-"));
+    testDirectories.push(watchDirectory, uploadDirectory);
+    const server = testServer(watchDirectory, uploadDirectory);
+    servers.push(server);
+    const content = Buffer.from('[Event "Uploaded"]\r\n\r\n1. e4 *\r\n', "utf8");
+
+    const response = await server.inject(multipartUpload("study.pgn", content));
+
+    expect(response.statusCode).toBe(201);
+    const record = response.json();
+    expect(Value.Check(FileRecordSchema, record)).toBe(true);
+    expect(record).toMatchObject({
+      path: join(realpathSync(uploadDirectory), "study.pgn"),
+      name: "study.pgn",
+      size: 0,
+      mtime_ns: 0,
+      fingerprint: "",
+      game_count: 0,
+      warning_count: 0,
+      scan_status: "pending",
+      scan_error: null,
+      scanned_at: null,
+      exists: true,
+      stale: false,
+      progress: null,
+    });
+    expect(readFileSync(record.path)).toEqual(content);
+  });
+
+  it("normalizes upload names and allocates a suffix for duplicates", async () => {
+    const watchDirectory = mkdtempSync(join(tmpdir(), "offline-pgn-reader-watch-"));
+    const uploadDirectory = mkdtempSync(join(tmpdir(), "offline-pgn-reader-upload-"));
+    testDirectories.push(watchDirectory, uploadDirectory);
+    const server = testServer(watchDirectory, uploadDirectory);
+    servers.push(server);
+    const content = Buffer.from("uploaded bytes", "utf8");
+
+    const first = await server.inject(multipartUpload("../Chapter: One", content));
+    const second = await server.inject(multipartUpload("../Chapter: One", content));
+
+    expect(first.statusCode).toBe(201);
+    expect(second.statusCode).toBe(201);
+    expect(first.json()).toMatchObject({
+      name: "Chapter_ One.pgn",
+      path: join(realpathSync(uploadDirectory), "Chapter_ One.pgn"),
+    });
+    expect(second.json()).toMatchObject({
+      name: "Chapter_ One-1.pgn",
+      path: join(realpathSync(uploadDirectory), "Chapter_ One-1.pgn"),
+    });
+    expect(readFileSync(first.json().path)).toEqual(content);
+    expect(readFileSync(second.json().path)).toEqual(content);
+  });
+
+  it("rejects uploads without the agreed file field", async () => {
+    const watchDirectory = mkdtempSync(join(tmpdir(), "offline-pgn-reader-watch-"));
+    testDirectories.push(watchDirectory);
+    const server = testServer(watchDirectory);
+    servers.push(server);
+
+    const wrongField = await server.inject(
+      multipartUpload("study.pgn", Buffer.from("bytes"), "source"),
+    );
+    const missing = await server.inject(emptyMultipart());
+
+    expect(wrongField.statusCode).toBe(400);
+    expect(wrongField.json()).toEqual({ detail: expect.stringContaining("file") });
+    expect(missing.statusCode).toBe(400);
+    expect(missing.json()).toEqual({ detail: expect.stringContaining("file") });
   });
 });

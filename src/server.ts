@@ -1,3 +1,4 @@
+import fastifyMultipart from "@fastify/multipart";
 import fastifyStatic from "@fastify/static";
 import { Type } from "@sinclair/typebox";
 import { Value } from "@sinclair/typebox/value";
@@ -28,7 +29,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
   const { databaseProbe, ...configOverrides } = options;
   const appConfig: AppConfig = { ...defaultConfig, ...configOverrides };
   const database = new LibraryDatabase(appConfig.dbPath);
-  const library = new LibraryService(database, appConfig.watchDirs);
+  const library = new LibraryService(database, appConfig.watchDirs, appConfig.uploadDir);
   const probe = databaseProbe ?? createSqliteProbe(appConfig.dbPath);
   const app = Fastify({
     logger: true,
@@ -39,6 +40,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     root: appConfig.frontendDir,
     prefix: "/static/",
   });
+  app.register(fastifyMultipart);
 
   app.get("/", async (_request, reply) => reply.sendFile("index.html"));
 
@@ -81,6 +83,20 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
       },
     },
     async (request, reply) => reply.code(201).send(library.registerFile(request.body.path)),
+  );
+
+  app.post(
+    "/api/files/upload",
+    { schema: { response: { 201: FileRecordSchema } } },
+    async (request, reply) => {
+      const part = await request.file();
+      if (!part || part.fieldname !== "file") {
+        throw new ServiceError("multipart field 'file' is required", 400);
+      }
+      return reply.code(201).send(
+        await library.uploadFile(part.filename || "upload.pgn", part.file),
+      );
+    },
   );
 
   app.get(

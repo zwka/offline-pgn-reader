@@ -13,6 +13,7 @@ export type AppConfig = {
   frontendDir: string;
   dbPath: string;
   watchDirs: string[];
+  uploadDir: string;
 };
 
 function readPort(raw: string | undefined): number {
@@ -55,6 +56,10 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       resolve(projectRoot, "samples"),
       resolve(projectRoot, "library"),
     ]),
+    uploadDir: resolveConfiguredPath(
+      env.PGNREADER_UPLOAD_DIR,
+      resolve(projectRoot, "library"),
+    ),
   };
 }
 

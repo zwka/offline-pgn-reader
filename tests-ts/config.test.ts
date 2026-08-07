@@ -28,4 +28,10 @@ describe("local process configuration", () => {
       resolve("tests/fixtures"),
     ]);
   });
+
+  it("resolves the managed upload directory", () => {
+    const configured = readConfig({ PGNREADER_UPLOAD_DIR: "~/pgn-library" });
+
+    expect(configured.uploadDir).toBe(join(homedir(), "pgn-library"));
+  });
 });

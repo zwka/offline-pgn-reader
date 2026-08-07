@@ -1,9 +1,17 @@
 import {
+  createWriteStream,
+  closeSync,
+  openSync,
+  mkdirSync,
   readdirSync,
   realpathSync,
+  renameSync,
+  rmSync,
   statSync,
   type Dirent,
 } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { pipeline } from "node:stream/promises";
 import { basename, extname, isAbsolute, join, resolve } from "node:path";
 import { homedir } from "node:os";
 
@@ -45,6 +53,7 @@ export class LibraryService {
   constructor(
     private readonly database: LibraryDatabase,
     private readonly watchDirs: string[],
+    private readonly uploadDir: string,
   ) {
     this.database.initialize();
   }
@@ -60,6 +69,27 @@ export class LibraryService {
         .get(sourcePath) as FileRow;
     });
     return this.toFileRecord(source);
+  }
+
+  async uploadFile(
+    rawFilename: string,
+    source: AsyncIterable<Uint8Array>,
+  ): Promise<FileRecord> {
+    mkdirSync(this.uploadDir, { recursive: true });
+    const filename = normalizeUploadName(rawFilename);
+    const temporaryPath = join(this.uploadDir, `.${filename}.${randomUUID()}.tmp`);
+    let committedPath: string | undefined;
+
+    try {
+      await pipeline(source, createWriteStream(temporaryPath, { flags: "wx" }));
+      committedPath = reserveUploadPath(this.uploadDir, filename);
+      renameSync(temporaryPath, committedPath);
+      return this.registerFile(committedPath);
+    } catch (error) {
+      rmSync(temporaryPath, { force: true });
+      if (committedPath) rmSync(committedPath, { force: true });
+      throw error;
+    }
   }
 
   listFiles(): FileRecord[] {
@@ -176,6 +206,37 @@ function canonicalSourcePath(rawPath: string): string {
     throw new ServiceError(`not a .pgn file: ${basename(sourcePath)}`, 422);
   }
   return sourcePath;
+}
+
+function normalizeUploadName(rawFilename: string): string {
+  const filename = basename(rawFilename.replaceAll("\\", "/"));
+  const safe = filename
+    .replace(/[^\p{L}\p{N}_\s.\-()]/gu, "_")
+    .trim();
+  const normalized = safe && safe !== "." && safe !== ".." ? safe : "upload.pgn";
+  return normalized.toLowerCase().endsWith(".pgn") ? normalized : `${normalized}.pgn`;
+}
+
+function reserveUploadPath(directory: string, filename: string): string {
+  const extension = extname(filename);
+  const stem = filename.slice(0, -extension.length);
+  let candidate = join(directory, filename);
+  let suffix = 1;
+  while (true) {
+    try {
+      const descriptor = openSync(candidate, "wx", 0o600);
+      closeSync(descriptor);
+      return candidate;
+    } catch (error) {
+      if (!isExistingPathError(error)) throw error;
+      candidate = join(directory, `${stem}-${suffix}${extension}`);
+      suffix += 1;
+    }
+  }
+}
+
+function isExistingPathError(error: unknown): boolean {
+  return error instanceof Error && "code" in error && error.code === "EEXIST";
 }
 
 function pgnFiles(directory: string): string[] {

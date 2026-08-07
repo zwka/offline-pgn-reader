@@ -26,3 +26,17 @@ test("shows a discovered source and registers it from the Library view", async (
   await page.getByRole("button", { name: "Index path" }).click();
   await expect(page.locator('[role="alert"]')).toContainText("not a file");
 });
+
+test("uploads a managed copy and refreshes the Library without navigation", async ({ page }) => {
+  await page.goto("/");
+
+  const upload = page.locator('input[type="file"]');
+  await upload.setInputFiles({
+    name: "browser-upload.pgn",
+    mimeType: "application/x-chess-pgn",
+    buffer: Buffer.from('[Event "Browser upload"]\n\n1. e4 *\n'),
+  });
+
+  await expect(page.locator(".file-card").filter({ hasText: "browser-upload.pgn" })).toBeVisible();
+  await expect(page).toHaveURL(/\/$/);
+});

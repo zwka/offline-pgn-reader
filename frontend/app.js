@@ -191,8 +191,15 @@ async function libraryView() {
                 onchange: async (e) => {
                   const file = e.target.files[0];
                   if (!file) return;
-                  try { await api.uploadFile(file); refresh(); }
-                  catch (err) { alert(err.message); }
+                  try {
+                    await api.uploadFile(file);
+                    intakeError = null;
+                    e.target.value = "";
+                    await refresh();
+                  } catch (err) {
+                    intakeError = err instanceof Error ? err.message : String(err);
+                    render(renderedFiles, renderedDiscovered);
+                  }
                 },
               })
             )

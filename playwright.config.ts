@@ -22,6 +22,7 @@ export default defineConfig({
       PGNREADER_DATA_DIR: browserDataDir,
       PGNREADER_PORT: port,
       PGNREADER_WATCH_DIRS: resolve("tests/fixtures"),
+      PGNREADER_UPLOAD_DIR: join(browserDataDir, "library"),
     },
     url: baseURL,
     reuseExistingServer: false,
