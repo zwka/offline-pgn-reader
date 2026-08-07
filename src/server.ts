@@ -151,7 +151,9 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
         querystring: Type.Object({
           q: Type.Optional(Type.String({ maxLength: 200 })),
           offset: Type.Optional(Type.String({ pattern: "^[0-9]+$" })),
-          limit: Type.Optional(Type.String({ pattern: "^[1-9][0-9]*$" })),
+          limit: Type.Optional(Type.String({
+            pattern: "^(?:[1-9]|[1-9][0-9]|[1-4][0-9]{2}|500)$",
+          })),
         }),
         response: { 200: GamePageSchema },
       },

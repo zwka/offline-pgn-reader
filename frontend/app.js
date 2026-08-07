@@ -9,6 +9,11 @@ const breadcrumb = document.getElementById("breadcrumb");
 const healthDot = document.getElementById("health-dot");
 
 let cleanupCurrentView = null;
+let viewGeneration = 0;
+
+function isViewCurrent(viewId) {
+  return viewId === viewGeneration;
+}
 
 // ------------------------------------------------------------------ utils
 
@@ -42,7 +47,8 @@ function setBreadcrumb(...parts) {
   });
 }
 
-function showError(err) {
+function showError(err, viewId) {
+  if (viewId !== undefined && !isViewCurrent(viewId)) return;
   app.textContent = "";
   app.appendChild(
     h("div", { class: "loading error-text" }, `Error: ${err.message || err}`)
@@ -66,7 +72,7 @@ pollHealth();
 
 // ------------------------------------------------------------------ library view
 
-async function libraryView() {
+async function libraryView(viewId) {
   setBreadcrumb(h("span", {}, "Library"));
   app.textContent = "";
   app.appendChild(h("div", { class: "loading" }, h("span", { class: "spinner" }), "Loading library…"));
@@ -83,9 +89,10 @@ async function libraryView() {
     try {
       [files, discovered] = await Promise.all([api.files(), api.discover()]);
     } catch (err) {
-      showError(err);
+      showError(err, viewId);
       return;
     }
+    if (!isViewCurrent(viewId)) return;
     render(files, discovered);
     if (files.some((f) => f.scan_status === "scanning")) {
       pollTimer = setTimeout(refresh, 700);
@@ -95,10 +102,12 @@ async function libraryView() {
   async function registerSource(path, onSuccess = () => {}) {
     try {
       await api.registerFile(path);
+      if (!isViewCurrent(viewId)) return;
       intakeError = null;
       onSuccess();
       await refresh();
     } catch (err) {
+      if (!isViewCurrent(viewId)) return;
       intakeError = err instanceof Error ? err.message : String(err);
       render(renderedFiles, renderedDiscovered);
     }
@@ -147,6 +156,7 @@ async function libraryView() {
               scanActionErrors.delete(f.id);
               await refresh();
             } catch (err) {
+              if (!isViewCurrent(viewId)) return;
               scanActionErrors.set(f.id, err instanceof Error ? err.message : String(err));
               render(renderedFiles, renderedDiscovered);
             }
@@ -158,7 +168,7 @@ async function libraryView() {
             e.stopPropagation();
             if (confirm(`Remove "${f.name}" from the index? The source file is not touched.`)) {
               await api.removeFile(f.id);
-              refresh();
+              if (isViewCurrent(viewId)) refresh();
             }
           },
         }, "Remove")
@@ -213,6 +223,7 @@ async function libraryView() {
                     e.target.value = "";
                     await refresh();
                   } catch (err) {
+                    if (!isViewCurrent(viewId)) return;
                     intakeError = err instanceof Error ? err.message : String(err);
                     render(renderedFiles, renderedDiscovered);
                   }
@@ -249,51 +260,118 @@ async function libraryView() {
 
 // ------------------------------------------------------------------ game list view
 
-async function fileView(fileId) {
-  app.textContent = "";
-  app.appendChild(h("div", { class: "loading" }, h("span", { class: "spinner" }), "Loading games…"));
-
-  let file;
-  try {
-    file = await api.file(fileId);
-  } catch (err) { return showError(err); }
-
-  setBreadcrumb(
-    h("a", { href: "#/library" }, "Library"),
-    h("span", {}, file.name)
-  );
-
+async function fileView(fileId, viewId) {
   const state = { q: "", offset: 0, limit: 100 };
+  let file = null;
+  let page = null;
+  let loading = true;
+  let staleRequest = false;
+  let requestError = null;
   let searchTimer = null;
-  cleanupCurrentView = () => clearTimeout(searchTimer);
+  let pollTimer = null;
+  let requestSequence = 0;
 
-  async function load() {
-    let page;
-    try {
-      page = await api.games(fileId, state);
-    } catch (err) { return showError(err); }
-    render(page);
+  cleanupCurrentView = () => {
+    clearTimeout(searchTimer);
+    clearTimeout(pollTimer);
+    requestSequence += 1;
+  };
+
+  function fileStatus() {
+    if (!file) return null;
+    if (file.scan_status === "scanning") {
+      const progress = file.progress && file.progress.bytesTotal
+        ? ` ${Math.round((100 * file.progress.bytesDone) / file.progress.bytesTotal)}%`
+        : "";
+      return h(
+        "div",
+        { class: "scan-state", role: "status" },
+        h("span", { class: "spinner" }),
+        `Indexing source…${progress}`,
+      );
+    }
+    if (file.scan_status === "pending") {
+      return h("div", { class: "scan-state", role: "status" }, "Index is waiting to be scanned.");
+    }
+    if (file.scan_status === "error") {
+      return h(
+        "div",
+        { class: "request-error", role: "alert" },
+        `Indexing failed: ${file.scan_error || "the source could not be indexed"}`,
+      );
+    }
+    if (file.stale) {
+      return h(
+        "div",
+        { class: "source-stale", role: "status" },
+        "The source changed after this index was built. Showing the last indexed records.",
+      );
+    }
+    return null;
   }
 
-  function render(page) {
-    const from = page.total === 0 ? 0 : page.offset + 1;
-    const to = Math.min(page.offset + page.limit, page.total);
+  function render() {
+    if (!isViewCurrent(viewId)) return;
+    if (file) {
+      setBreadcrumb(
+        h("a", { href: "#/library" }, "Library"),
+        h("span", {}, file.name),
+      );
+    } else {
+      setBreadcrumb(h("a", { href: "#/library" }, "Library"), h("span", {}, "Source"));
+    }
+
+    const from = page && page.total > 0 ? page.offset + 1 : 0;
+    const to = page ? Math.min(page.offset + page.limit, page.total) : 0;
+    const emptyMessage = state.q
+      ? "No games match this search."
+      : file?.scan_status === "ready"
+        ? "No indexed games in this source."
+        : "No games are available until indexing finishes.";
+
     app.textContent = "";
     app.appendChild(
       h(
         "div",
         {},
-        h("h2", {}, file.name, " ", h("span", { class: "muted" }, `· ${file.game_count} games`)),
-        file.warning_count > 0
-          ? h("div", { class: "warn-panel" },
-              `${file.warning_count} game(s) were indexed with warnings (malformed records). They are readable but flagged with ⚠ below.`)
+        h(
+          "h2",
+          {},
+          file?.name || "Source",
+          file ? " " : null,
+          file ? h("span", { class: "muted" }, `· ${file.game_count} games`) : null,
+        ),
+        file ? fileStatus() : null,
+        file && file.warning_count > 0
+          ? h(
+              "div",
+              { class: "warn-panel" },
+              `${file.warning_count} game(s) were indexed with warnings (malformed records). They are readable but flagged with ⚠ below.`,
+            )
+          : null,
+        requestError
+          ? h(
+              "div",
+              { class: "request-error", role: "alert" },
+              `Could not load games: ${requestError}`,
+              h(
+                "button",
+                { class: "ghost-btn", style: "margin-left:10px", onclick: load },
+                "Retry",
+              ),
+            )
+          : null,
+        staleRequest
+          ? h("div", { class: "stale-state", role: "status" }, "Updating game list… showing the last available page.")
           : null,
         h(
           "div",
           { class: "toolbar", style: "margin-top:12px" },
           h("input", {
-            type: "search", placeholder: "Filter by player, event, site, ECO, opening, date…",
+            type: "search",
+            placeholder: "Filter by player, event, site, ECO, opening, date…",
             value: state.q,
+            disabled: !file ? "" : null,
             oninput: (e) => {
               clearTimeout(searchTimer);
               searchTimer = setTimeout(() => {
@@ -303,63 +381,131 @@ async function fileView(fileId) {
               }, 250);
             },
           }),
-          h("span", { class: "muted" }, `${page.total} match${page.total === 1 ? "" : "es"}`)
+          page
+            ? h("span", { class: "muted" }, `${page.total} match${page.total === 1 ? "" : "es"}`)
+            : null,
         ),
-        h(
-          "table",
-          { class: "games-table" },
-          h("thead", {},
-            h("tr", {},
-              ...["#", "White", "Black", "Event", "Date", "Round", "Result", ""].map((c) => h("th", {}, c)))),
-          h(
-            "tbody",
-            {},
-            page.games.map((g) =>
+        loading && !page
+          ? h("div", { class: "loading" }, h("span", { class: "spinner" }), "Loading games…")
+          : null,
+        page
+          ? h(
+              "div",
+              { class: "games-table-wrap" },
               h(
-                "tr",
-                { onclick: () => (location.hash = `#/game/${g.id}`) },
-                h("td", { class: "num" }, String(g.idx_in_file + 1)),
-                h("td", {}, g.white || "—"),
-                h("td", {}, g.black || "—"),
-                h("td", {}, g.event === "?" ? "" : g.event),
-                h("td", {}, g.date === "????.??.??" ? "" : g.date),
-                h("td", {}, g.round === "?" ? "" : g.round),
-                h("td", { class: "num" }, g.result),
-                h("td", {}, g.warning ? h("span", { class: "warn-text", title: g.warning }, "⚠") : "")
-              )
+                "table",
+                { class: "games-table" },
+                h(
+                  "thead",
+                  {},
+                  h(
+                    "tr",
+                    {},
+                    ...["#", "White", "Black", "Event", "Site", "Date", "Round", "Result", ""].map((c) => h("th", {}, c)),
+                  ),
+                ),
+                h(
+                  "tbody",
+                  {},
+                  page.games.map((g) =>
+                    h(
+                      "tr",
+                      { onclick: () => (location.hash = `#/game/${g.id}`) },
+                      h("td", { class: "num" }, String(g.idx_in_file + 1)),
+                      h("td", {}, g.white || "—"),
+                      h("td", {}, g.black || "—"),
+                      h("td", {}, g.event === "?" ? "" : g.event),
+                      h("td", {}, g.site === "?" ? "" : g.site),
+                      h("td", {}, g.date === "????.??.??" ? "" : g.date),
+                      h("td", {}, g.round === "?" ? "" : g.round),
+                      h("td", { class: "num" }, g.result),
+                      h("td", {}, g.warning ? h("span", { class: "warn-text", title: g.warning }, "⚠") : ""),
+                    ),
+                  ),
+                ),
+              ),
             )
-          )
-        ),
-        h(
-          "div",
-          { class: "pager" },
-          h("button", {
-            class: "ghost-btn", disabled: page.offset === 0 ? "" : null,
-            onclick: () => { state.offset = Math.max(0, state.offset - state.limit); load(); },
-          }, "‹ Prev"),
-          h("span", {}, `${from}–${to} of ${page.total}`),
-          h("button", {
-            class: "ghost-btn", disabled: to >= page.total ? "" : null,
-            onclick: () => { state.offset += state.limit; load(); },
-          }, "Next ›")
-        )
-      )
+          : null,
+        page && page.games.length === 0
+          ? h("div", { class: "empty-state", role: "status" }, emptyMessage)
+          : null,
+        page
+          ? h(
+              "div",
+              { class: "pager" },
+              h("button", {
+                class: "ghost-btn",
+                disabled: loading || page.offset === 0 ? "" : null,
+                onclick: () => {
+                  state.offset = Math.max(0, state.offset - state.limit);
+                  load();
+                },
+              }, "‹ Prev"),
+              h("span", {}, `${from}–${to} of ${page.total}`),
+              h("button", {
+                class: "ghost-btn",
+                disabled: loading || to >= page.total ? "" : null,
+                onclick: () => {
+                  state.offset += state.limit;
+                  load();
+                },
+              }, "Next ›"),
+            )
+          : null,
+      ),
     );
   }
 
+  async function load() {
+    clearTimeout(pollTimer);
+    pollTimer = null;
+    const sequence = ++requestSequence;
+    const hasPage = page !== null;
+    loading = !hasPage;
+    staleRequest = hasPage;
+    requestError = null;
+    render();
+
+    try {
+      const nextFile = await api.file(fileId);
+      if (!isViewCurrent(viewId) || sequence !== requestSequence) return;
+      file = nextFile;
+      render();
+      const nextPage = await api.games(fileId, state);
+      if (!isViewCurrent(viewId) || sequence !== requestSequence) return;
+      page = nextPage;
+      loading = false;
+      staleRequest = false;
+      requestError = null;
+      render();
+      if (file.scan_status === "scanning" || file.scan_status === "pending") {
+        pollTimer = setTimeout(load, 700);
+      }
+    } catch (err) {
+      if (!isViewCurrent(viewId) || sequence !== requestSequence) return;
+      loading = false;
+      staleRequest = false;
+      requestError = err instanceof Error ? err.message : String(err);
+      render();
+    }
+  }
+
+  render();
   load();
 }
 
 // ------------------------------------------------------------------ reader view
 
-async function gameView(gameId) {
+async function gameView(gameId, viewId) {
+  if (!isViewCurrent(viewId)) return;
   app.textContent = "";
   app.appendChild(h("div", { class: "loading" }, h("span", { class: "spinner" }), "Loading game…"));
 
   let doc;
   try {
     doc = await api.game(gameId);
-  } catch (err) { return showError(err); }
+  } catch (err) { return showError(err, viewId); }
+  if (!isViewCurrent(viewId)) return;
 
   const nodes = doc.nodes;
   const headers = Object.fromEntries(doc.headers);
@@ -446,6 +592,7 @@ async function gameView(gameId) {
 
   // ---- notation
   const { rootEl, nodeEls } = await buildNotation(doc, { onSelect: selectNode });
+  if (!isViewCurrent(viewId)) return;
   notationPane.textContent = "";
   notationPane.appendChild(rootEl);
 
@@ -534,12 +681,13 @@ async function gameView(gameId) {
 
 function route() {
   if (cleanupCurrentView) { cleanupCurrentView(); cleanupCurrentView = null; }
+  const viewId = ++viewGeneration;
   const hash = location.hash || "#/library";
   const mFile = hash.match(/^#\/file\/(\d+)$/);
   const mGame = hash.match(/^#\/game\/(\d+)$/);
-  if (mFile) fileView(+mFile[1]);
-  else if (mGame) gameView(+mGame[1]);
-  else libraryView();
+  if (mFile) fileView(+mFile[1], viewId);
+  else if (mGame) gameView(+mGame[1], viewId);
+  else libraryView(viewId);
 }
 
 window.addEventListener("hashchange", route);

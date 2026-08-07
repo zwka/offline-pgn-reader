@@ -111,6 +111,62 @@ def test_search_query(client, fixture_copy):
     assert none["total"] == 0
 
 
+def test_game_list_contract_defaults_paging_fields_and_bounds(client, tmp_path):
+    source = tmp_path / "list-contract.pgn"
+    source.write_text(
+        '[Event "Contract Match"]\n[Site "Remote"]\n[Date "2024.02.02"]\n'
+        '[Round "2"]\n[White "White Two"]\n[Black "Black Two"]\n'
+        '[Result "*"]\n[ECO "D10"]\n[Opening "Queen Pawn"]\n\n1. d4 *\n',
+        encoding="utf-8",
+    )
+    f = register(client, source)
+
+    default_page = client.get(f"/api/files/{f['id']}/games")
+    assert default_page.status_code == 200
+    page = default_page.json()
+    assert page["total"] == 1
+    assert page["offset"] == 0
+    assert page["limit"] == 100
+    assert set(page["games"][0]) == {
+        "id", "idx_in_file", "event", "site", "date", "round", "white", "black",
+        "result", "eco", "opening", "has_fen", "warning", "byte_size",
+    }
+    assert page["games"][0] == {
+        **page["games"][0],
+        "idx_in_file": 0,
+        "event": "Contract Match",
+        "site": "Remote",
+        "date": "2024.02.02",
+        "round": "2",
+        "white": "White Two",
+        "black": "Black Two",
+        "result": "*",
+        "eco": "D10",
+        "opening": "Queen Pawn",
+        "has_fen": 0,
+        "warning": None,
+    }
+
+    paged = client.get(
+        f"/api/files/{f['id']}/games", params={"offset": 1, "limit": 1}
+    )
+    assert paged.json() == {"total": 1, "offset": 1, "limit": 1, "games": []}
+    for query in (
+        "White Two", "Black Two", "Contract Match", "Remote", "Queen Pawn", "D10", "2024.02.02"
+    ):
+        hits = client.get(f"/api/files/{f['id']}/games", params={"q": f"  {query}  "})
+        assert hits.status_code == 200
+        assert hits.json()["total"] == 1
+
+    for params in (
+        {"limit": 0},
+        {"limit": 501},
+        {"offset": -1},
+        {"q": "x" * 201},
+    ):
+        assert client.get(f"/api/files/{f['id']}/games", params=params).status_code == 422
+
+
 def test_upload(client):
     content = (FIXTURES / "fen_start.pgn").read_bytes()
     r = client.post(

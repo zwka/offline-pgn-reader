@@ -119,6 +119,7 @@ kbd {
 /* ---------- game list ---------- */
 .toolbar { display: flex; gap: 10px; align-items: center; margin-bottom: 12px; flex-wrap: wrap; }
 .toolbar input[type="search"] { width: 300px; }
+.games-table-wrap { overflow-x: auto; }
 .games-table { width: 100%; border-collapse: collapse; background: var(--bg-panel); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
 .games-table th, .games-table td { padding: 6px 10px; text-align: left; border-bottom: 1px solid var(--border); font-size: 13px; }
 .games-table th { background: var(--bg-inset); color: var(--text-dim); font-weight: 600; position: sticky; top: 44px; }
@@ -126,6 +127,12 @@ kbd {
 .games-table tbody tr:hover { background: var(--bg-inset); }
 .games-table td.num { color: var(--text-dim); width: 46px; font: 12px var(--mono); }
 .pager { display: flex; gap: 10px; align-items: center; margin-top: 12px; color: var(--text-dim); font-size: 13px; }
+.scan-state, .stale-state, .source-stale, .request-error, .empty-state {
+  margin: 10px 0; padding: 9px 12px; border: 1px solid var(--border); border-radius: 6px;
+}
+.scan-state, .stale-state, .empty-state { color: var(--text-dim); background: var(--bg-inset); }
+.source-stale { color: var(--warn); border-color: var(--warn); background: rgba(229,181,103,.06); }
+.request-error { color: var(--bad); border-color: var(--bad); background: rgba(224,108,117,.06); }
 
 /* ---------- reader layout ---------- */
 .reader { display: grid; grid-template-columns: minmax(340px, 480px) 1fr; gap: 18px; align-items: start; }

@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Route } from "@playwright/test";
 import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -61,6 +61,75 @@ test("uploads a managed copy and refreshes the Library without navigation", asyn
   await expect(page).toHaveURL(/\/$/);
 });
 
+test("opens a source and browses paginated, searchable Game records", async ({ page }) => {
+  const directory = mkdtempSync(join(tmpdir(), "offline-pgn-reader-browser-games-"));
+  const source = join(directory, "browse.pgn");
+  const content = Array.from({ length: 101 }, (_, index) => {
+    const number = index + 1;
+    return [
+      `[Event "Browse ${number}"]`,
+      '[Site "Browser"]',
+      '[Date "2024.01.01"]',
+      `[Round "${number}"]`,
+      `[White "Player ${number}"]`,
+      `[Black "Opponent ${number}"]`,
+      '[Result "*"]',
+      "",
+      "1. e4 *",
+      "",
+    ].join("\n");
+  }).join("\n");
+  writeFileSync(source, content);
+
+  try {
+    await page.goto("/");
+    await page.locator("#path-input").fill(source);
+    await page.getByRole("button", { name: "Index path" }).click();
+    const card = page.locator(".file-card").filter({ hasText: "browse.pgn" });
+    await expect(card).toContainText("101 games", { timeout: 10_000 });
+
+    const delayedInitialList = async (route: Route) => {
+      await new Promise((resolveTimer) => setTimeout(resolveTimer, 250));
+      await route.continue();
+    };
+    await page.route("**/api/files/*/games**", delayedInitialList);
+    await card.click();
+    await expect(page.locator("#app .loading")).toBeVisible();
+    await expect(page.locator(".games-table tbody tr")).toHaveCount(100, { timeout: 10_000 });
+    await expect(page.locator(".pager")).toContainText("1–100 of 101");
+    await page.unroute("**/api/files/*/games**", delayedInitialList);
+
+    await page.getByRole("button", { name: "Next ›" }).click();
+    await expect(page.locator(".pager")).toContainText("101–101 of 101");
+    await expect(page.locator(".games-table tbody tr")).toHaveCount(1);
+    await expect(page.locator(".games-table tbody tr")).toContainText("Player 101");
+
+    const delayedSearch = async (route: Route) => {
+      await new Promise((resolveTimer) => setTimeout(resolveTimer, 250));
+      await route.continue();
+    };
+    await page.route("**/api/files/*/games**", delayedSearch);
+    await page.locator('input[type="search"]').fill("Player 100");
+    await expect(page.locator(".stale-state")).toBeVisible();
+    await expect(page.locator(".games-table tbody tr")).toContainText("Player 100", { timeout: 10_000 });
+    await page.unroute("**/api/files/*/games**", delayedSearch);
+
+    await page.locator('input[type="search"]').fill("does-not-exist");
+    await expect(page.locator(".empty-state")).toContainText("No games match this search.", { timeout: 10_000 });
+    await page.locator('input[type="search"]').fill("Player 101");
+    await expect(page.locator(".games-table tbody tr")).toContainText("Player 101", { timeout: 10_000 });
+
+    const failedList = async (route: Route) => route.abort();
+    await page.route("**/api/files/*/games**", failedList);
+    await page.locator('input[type="search"]').fill("Player 1");
+    await expect(page.locator(".request-error")).toContainText("Could not load games", { timeout: 10_000 });
+    await expect(page.locator(".games-table tbody tr")).toContainText("Player 101");
+    await page.unroute("**/api/files/*/games**", failedList);
+  } finally {
+    rmSync(directory, { force: true, recursive: true });
+  }
+});
+
 test("shows a changed source as stale and rescans it from the Library", async ({ page }) => {
   const directory = mkdtempSync(join(tmpdir(), "offline-pgn-reader-browser-stale-"));
   const source = join(directory, "changed.pgn");
@@ -77,6 +146,11 @@ test("shows a changed source as stale and rescans it from the Library", async ({
     await page.reload();
     await expect(card.locator(".badge.stale")).toBeVisible();
     await expect(card.getByRole("button", { name: "Re-scan (changed)" })).toBeVisible();
+
+    await card.click();
+    await expect(page.locator(".source-stale")).toContainText("source changed");
+    await expect(page.locator(".games-table tbody tr")).toHaveCount(1);
+    await page.goto("/");
 
     await card.getByRole("button", { name: "Re-scan (changed)" }).click();
     await expect(card.locator(".badge.ready")).toBeVisible({ timeout: 10_000 });
