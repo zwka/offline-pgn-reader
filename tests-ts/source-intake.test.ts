@@ -28,6 +28,17 @@ function testServer(watchDirectory: string, uploadDir?: string) {
   });
 }
 
+async function waitForReady(server: ReturnType<typeof buildServer>, fileId: number) {
+  const deadline = Date.now() + 10_000;
+  let record;
+  do {
+    record = (await server.inject({ method: "GET", url: `/api/files/${fileId}` })).json();
+    if (record.scan_status === "ready" || record.scan_status === "error") return record;
+    await new Promise((resolveTimer) => setTimeout(resolveTimer, 10));
+  } while (Date.now() < deadline);
+  throw new Error(`scan did not finish: ${JSON.stringify(record)}`);
+}
+
 function multipartUpload(filename: string, content: Buffer, fieldName = "file") {
   const boundary = "offline-pgn-reader-test-boundary";
   return {
@@ -86,7 +97,7 @@ describe("PGN source intake", () => {
     ]);
   });
 
-  it("registers a source once and returns the compatible FileRecord", async () => {
+  it("registers a source once and returns a scanning FileRecord", async () => {
     const watchDirectory = mkdtempSync(join(tmpdir(), "offline-pgn-reader-watch-"));
     testDirectories.push(watchDirectory);
     const source = sourceFixture(watchDirectory);
@@ -106,23 +117,23 @@ describe("PGN source intake", () => {
 
     expect(first.statusCode).toBe(201);
     expect(second.statusCode).toBe(201);
-    const record = first.json();
-    expect(second.json()).toEqual(record);
+    const initial = first.json();
+    expect(second.json().id).toBe(initial.id);
+    const record = await waitForReady(server, initial.id);
     expect(record).toMatchObject({
       path: realpathSync(source),
       name: "study.pgn",
-      size: 0,
-      mtime_ns: 0,
-      fingerprint: "",
-      game_count: 0,
+      size: readFileSync(source).byteLength,
+      game_count: 1,
       warning_count: 0,
-      scan_status: "pending",
+      scan_status: "ready",
       scan_error: null,
-      scanned_at: null,
       exists: true,
       stale: false,
       progress: null,
     });
+    expect(record.mtime_ns).toBeGreaterThan(0);
+    expect(record.fingerprint).toMatch(/^[0-9a-f]{40}$/);
     expect(record.id).toEqual(expect.any(Number));
     expect(await server.inject({ method: "GET", url: "/api/files" }).then((res) => res.json()))
       .toHaveLength(1);
@@ -175,7 +186,7 @@ describe("PGN source intake", () => {
     expect(response.json().detail).toContain("must be string");
   });
 
-  it("uploads source bytes into the managed Library and returns a pending FileRecord", async () => {
+  it("uploads source bytes into the managed Library and scans the copy", async () => {
     const watchDirectory = mkdtempSync(join(tmpdir(), "offline-pgn-reader-watch-"));
     const uploadDirectory = mkdtempSync(join(tmpdir(), "offline-pgn-reader-upload-"));
     testDirectories.push(watchDirectory, uploadDirectory);
@@ -186,19 +197,17 @@ describe("PGN source intake", () => {
     const response = await server.inject(multipartUpload("study.pgn", content));
 
     expect(response.statusCode).toBe(201);
-    const record = response.json();
-    expect(Value.Check(FileRecordSchema, record)).toBe(true);
+    const initial = response.json();
+    expect(Value.Check(FileRecordSchema, initial)).toBe(true);
+    const record = await waitForReady(server, initial.id);
     expect(record).toMatchObject({
       path: join(realpathSync(uploadDirectory), "study.pgn"),
       name: "study.pgn",
-      size: 0,
-      mtime_ns: 0,
-      fingerprint: "",
-      game_count: 0,
+      size: content.byteLength,
+      game_count: 1,
       warning_count: 0,
-      scan_status: "pending",
+      scan_status: "ready",
       scan_error: null,
-      scanned_at: null,
       exists: true,
       stale: false,
       progress: null,

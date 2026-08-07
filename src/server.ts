@@ -11,6 +11,7 @@ import {
   DiscoveredSourceSchema,
   ErrorResponseSchema,
   FileRecordSchema,
+  GamePageSchema,
   HealthResponseSchema,
   RegisterFileRequestSchema,
   type ErrorResponse,
@@ -35,6 +36,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     logger: true,
     ajv: { customOptions: { coerceTypes: false } },
   });
+  app.addHook("onClose", async () => library.close());
 
   app.register(fastifyStatic, {
     root: appConfig.frontendDir,
@@ -114,6 +116,52 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
       },
     },
     async (request) => library.getFile(Number(request.params.fileId)),
+  );
+
+  app.post<{
+    Params: { fileId: string };
+    Querystring: { force?: "true" | "false" };
+  }>(
+    "/api/files/:fileId/rescan",
+    {
+      schema: {
+        params: Type.Object({ fileId: Type.String({ pattern: "^[1-9][0-9]*$" }) }),
+        querystring: Type.Object({
+          force: Type.Optional(Type.Union([Type.Literal("true"), Type.Literal("false")])),
+        }),
+      },
+    },
+    async (request) => {
+      const scanStarted = library.startScan(
+        Number(request.params.fileId),
+        request.query.force !== "false",
+      );
+      return { ...library.getFile(Number(request.params.fileId)), scanStarted };
+    },
+  );
+
+  app.get<{
+    Params: { fileId: string };
+    Querystring: { q?: string; offset?: string; limit?: string };
+  }>(
+    "/api/files/:fileId/games",
+    {
+      schema: {
+        params: Type.Object({ fileId: Type.String({ pattern: "^[1-9][0-9]*$" }) }),
+        querystring: Type.Object({
+          q: Type.Optional(Type.String({ maxLength: 200 })),
+          offset: Type.Optional(Type.String({ pattern: "^[0-9]+$" })),
+          limit: Type.Optional(Type.String({ pattern: "^[1-9][0-9]*$" })),
+        }),
+        response: { 200: GamePageSchema },
+      },
+    },
+    async (request) => library.listGames(
+      Number(request.params.fileId),
+      request.query.q ?? "",
+      Number(request.query.offset ?? 0),
+      Number(request.query.limit ?? 100),
+    ),
   );
 
   app.setNotFoundHandler(async (_request, reply) =>

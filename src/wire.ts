@@ -56,6 +56,40 @@ export const FileRecordSchema = Type.Object(
 
 export type FileRecord = Static<typeof FileRecordSchema>;
 
+export const GameRecordSchema = Type.Object(
+  {
+    id: Type.Integer({ minimum: 1 }),
+    idx_in_file: Type.Integer({ minimum: 0 }),
+    event: Type.String(),
+    site: Type.String(),
+    date: Type.String(),
+    round: Type.String(),
+    white: Type.String(),
+    black: Type.String(),
+    result: Type.String(),
+    eco: Type.String(),
+    opening: Type.String(),
+    has_fen: Type.Integer({ minimum: 0, maximum: 1 }),
+    warning: Type.Union([Type.String(), Type.Null()]),
+    byte_size: Type.Integer({ minimum: 0 }),
+  },
+  { additionalProperties: false },
+);
+
+export type GameRecord = Static<typeof GameRecordSchema>;
+
+export const GamePageSchema = Type.Object(
+  {
+    total: Type.Integer({ minimum: 0 }),
+    offset: Type.Integer({ minimum: 0 }),
+    limit: Type.Integer({ minimum: 1 }),
+    games: Type.Array(GameRecordSchema),
+  },
+  { additionalProperties: false },
+);
+
+export type GamePage = Static<typeof GamePageSchema>;
+
 export const DiscoveredSourceSchema = Type.Object(
   {
     path: Type.String(),

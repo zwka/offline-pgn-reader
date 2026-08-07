@@ -10,11 +10,13 @@ import {
 } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { pipeline } from "node:stream/promises";
+import { Worker } from "node:worker_threads";
 import { basename, extname, isAbsolute, join, resolve } from "node:path";
 import { homedir } from "node:os";
 
 import { LibraryDatabase } from "./database.js";
-import type { DiscoveredSource, FileRecord } from "./wire.js";
+import { fingerprintFile } from "./scanner.js";
+import type { DiscoveredSource, FileRecord, GamePage } from "./wire.js";
 
 type FileRow = {
   id: number;
@@ -29,6 +31,40 @@ type FileRow = {
   scan_error: string | null;
   scanned_at: string | null;
 };
+
+type GameListRow = {
+  id: number;
+  idx_in_file: number;
+  event: string;
+  site: string;
+  date: string;
+  round: string;
+  white: string;
+  black: string;
+  result: string;
+  eco: string;
+  opening: string;
+  has_fen: number;
+  warning: string | null;
+  byte_size: number;
+};
+
+type ScanProgressState = {
+  bytesDone: number;
+  bytesTotal: number;
+  gamesFound: number;
+};
+
+type ActiveScan = {
+  worker: Worker;
+  progress: ScanProgressState;
+  finished: boolean;
+};
+
+type ScanWorkerMessage =
+  | { type: "progress"; bytesDone: number; bytesTotal: number; gamesFound: number }
+  | { type: "complete" }
+  | { type: "error"; error: string };
 
 export class ServiceError extends Error {
   constructor(
@@ -48,6 +84,9 @@ export class NotFound extends ServiceError {
 }
 
 export class LibraryService {
+  private readonly progress = new Map<number, ScanProgressState>();
+  private readonly activeScans = new Map<number, ActiveScan>();
+
   constructor(
     private readonly database: LibraryDatabase,
     private readonly watchDirs: string[],
@@ -66,7 +105,8 @@ export class LibraryService {
         .prepare("SELECT * FROM files WHERE path=?")
         .get(sourcePath) as FileRow;
     });
-    return this.toFileRecord(source);
+    this.startScan(source.id);
+    return this.getFile(source.id);
   }
 
   async uploadFile(
@@ -107,6 +147,122 @@ export class LibraryService {
     );
     if (!source) throw new NotFound(`file ${fileId} not found`);
     return this.toFileRecord(source);
+  }
+
+  listGames(fileId: number, query = "", offset = 0, limit = 100): GamePage {
+    this.getFile(fileId);
+    const normalizedOffset = Math.max(0, offset);
+    const normalizedLimit = Math.max(1, Math.min(limit, 500));
+    const search = query.trim();
+    const where = ["file_id=?"];
+    const params: Array<string | number> = [fileId];
+    if (search) {
+      const like = `%${search}%`;
+      where.push(
+        "(white LIKE ? OR black LIKE ? OR event LIKE ? OR site LIKE ? OR opening LIKE ? OR eco LIKE ? OR date LIKE ?)",
+      );
+      params.push(like, like, like, like, like, like, like);
+    }
+    const whereSql = where.join(" AND ");
+    return this.database.withConnection((database) => {
+      const total = (database
+        .prepare(`SELECT COUNT(*) AS count FROM games WHERE ${whereSql}`)
+        .get(...params) as { count: number }).count;
+      const games = database
+        .prepare(
+          `SELECT id, idx_in_file, event, site, date, round, white, black,
+             result, eco, opening, has_fen, warning,
+             offset_end - offset_start AS byte_size
+           FROM games WHERE ${whereSql}
+           ORDER BY idx_in_file LIMIT ? OFFSET ?`,
+        )
+        .all(...params, normalizedLimit, normalizedOffset) as GameListRow[];
+      return {
+        total,
+        offset: normalizedOffset,
+        limit: normalizedLimit,
+        games,
+      };
+    });
+  }
+
+  startScan(fileId: number, force = false): boolean {
+    const file = this.getFile(fileId);
+    if (this.activeScans.has(fileId)) return false;
+
+    if (!force && file.scan_status === "ready") {
+      try {
+        if (fingerprintFile(file.path) === file.fingerprint) return false;
+      } catch {
+        throw new ServiceError(`source file missing: ${file.path}`, 409);
+      }
+    }
+
+    let bytesTotal: number;
+    try {
+      bytesTotal = statSync(file.path).size;
+    } catch {
+      throw new ServiceError(`source file missing: ${file.path}`, 409);
+    }
+
+    const progress: ScanProgressState = { bytesDone: 0, bytesTotal, gamesFound: 0 };
+    this.progress.set(fileId, progress);
+    this.database.withConnection((database) => {
+      database
+        .prepare("UPDATE files SET scan_status='scanning', scan_error=NULL WHERE id=?")
+        .run(fileId);
+    });
+
+    let worker: Worker;
+    try {
+      worker = new Worker(new URL("./scan-worker.ts", import.meta.url), {
+        workerData: {
+          dbPath: this.database.path,
+          fileId,
+          sourcePath: file.path,
+        },
+        execArgv: workerExecArgv(),
+      });
+    } catch (error) {
+      this.progress.delete(fileId);
+      this.setScanError(fileId, error);
+      throw error;
+    }
+
+    const state: ActiveScan = { worker, progress, finished: false };
+    this.activeScans.set(fileId, state);
+    const finish = (error?: unknown) => {
+      if (state.finished) return;
+      state.finished = true;
+      this.activeScans.delete(fileId);
+      this.progress.delete(fileId);
+      if (error) this.setScanError(fileId, error);
+    };
+    worker.on("message", (message: ScanWorkerMessage) => {
+      if (state.finished) return;
+      if (message.type === "progress") {
+        state.progress.bytesDone = message.bytesDone;
+        state.progress.bytesTotal = message.bytesTotal;
+        state.progress.gamesFound = message.gamesFound;
+      } else if (message.type === "complete") {
+        finish();
+      } else if (message.type === "error") {
+        finish(message.error);
+      }
+    });
+    worker.on("error", (error) => finish(error));
+    worker.on("exit", (code) => {
+      if (code !== 0) finish(new Error(`scan worker exited with code ${code}`));
+    });
+    return true;
+  }
+
+  async close(): Promise<void> {
+    const scans = [...this.activeScans.values()];
+    for (const scan of scans) scan.finished = true;
+    this.activeScans.clear();
+    this.progress.clear();
+    await Promise.allSettled(scans.map((scan) => scan.worker.terminate()));
   }
 
   discover(): DiscoveredSource[] {
@@ -153,10 +309,10 @@ export class LibraryService {
     let exists = false;
     let stale = false;
     try {
-      const stats = statSync(source.path);
+      const stats = statSync(source.path, { bigint: true });
       exists = stats.isFile();
       stale = exists && source.scan_status === "ready" && (
-        stats.size !== source.size || fileMtimeNs(stats.mtimeMs) !== source.mtime_ns
+        Number(stats.size) !== source.size || fileMtimeNs(stats.mtimeNs) !== source.mtime_ns
       );
     } catch {
       // A registered source can disappear after registration; keep its record readable.
@@ -175,8 +331,19 @@ export class LibraryService {
       scanned_at: source.scanned_at,
       exists,
       stale,
-      progress: null,
+      progress: source.scan_status === "scanning"
+        ? this.progress.get(source.id) ?? null
+        : null,
     };
+  }
+
+  private setScanError(fileId: number, error: unknown): void {
+    const message = error instanceof Error ? error.message : String(error);
+    this.database.withConnection((database) => {
+      database
+        .prepare("UPDATE files SET scan_status='error', scan_error=? WHERE id=?")
+        .run(message, fileId);
+    });
   }
 }
 
@@ -263,6 +430,14 @@ function pgnFiles(directory: string): string[] {
   return candidates.sort();
 }
 
-function fileMtimeNs(mtimeMs: number): number {
-  return Math.trunc(mtimeMs * 1_000_000);
+function fileMtimeNs(mtimeNs: bigint): number {
+  return Number(mtimeNs);
+}
+
+function workerExecArgv(): string[] {
+  const hasTsxLoader = process.execArgv.some(
+    (argument, index) => argument === "tsx/esm" ||
+      (argument === "--import" && process.execArgv[index + 1] === "tsx/esm"),
+  );
+  return hasTsxLoader ? process.execArgv : [...process.execArgv, "--import", "tsx/esm"];
 }

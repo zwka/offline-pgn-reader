@@ -58,7 +58,11 @@ function openDatabase(path: string) {
   return database;
 }
 
-type SqliteConnection = ReturnType<typeof openDatabase>;
+export type SqliteConnection = ReturnType<typeof openDatabase>;
+
+export function openSqliteConnection(path: string): SqliteConnection {
+  return openDatabase(path);
+}
 
 export class LibraryDatabase {
   constructor(public readonly path: string) {}
