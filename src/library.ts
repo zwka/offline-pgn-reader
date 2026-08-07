@@ -1,11 +1,9 @@
 import {
   createWriteStream,
-  closeSync,
-  openSync,
+  linkSync,
   mkdirSync,
   readdirSync,
   realpathSync,
-  renameSync,
   rmSync,
   statSync,
   type Dirent,
@@ -82,8 +80,8 @@ export class LibraryService {
 
     try {
       await pipeline(source, createWriteStream(temporaryPath, { flags: "wx" }));
-      committedPath = reserveUploadPath(this.uploadDir, filename);
-      renameSync(temporaryPath, committedPath);
+      committedPath = linkUploadPath(this.uploadDir, filename, temporaryPath);
+      rmSync(temporaryPath, { force: true });
       return this.registerFile(committedPath);
     } catch (error) {
       rmSync(temporaryPath, { force: true });
@@ -210,22 +208,23 @@ function canonicalSourcePath(rawPath: string): string {
 
 function normalizeUploadName(rawFilename: string): string {
   const filename = basename(rawFilename.replaceAll("\\", "/"));
-  const safe = filename
+  const sanitizedFilename = filename
     .replace(/[^\p{L}\p{N}_\s.\-()]/gu, "_")
     .trim();
-  const normalized = safe && safe !== "." && safe !== ".." ? safe : "upload.pgn";
+  const normalized = sanitizedFilename && sanitizedFilename !== "." && sanitizedFilename !== ".."
+    ? sanitizedFilename
+    : "upload.pgn";
   return normalized.toLowerCase().endsWith(".pgn") ? normalized : `${normalized}.pgn`;
 }
 
-function reserveUploadPath(directory: string, filename: string): string {
+function linkUploadPath(directory: string, filename: string, sourcePath: string): string {
   const extension = extname(filename);
   const stem = filename.slice(0, -extension.length);
   let candidate = join(directory, filename);
   let suffix = 1;
   while (true) {
     try {
-      const descriptor = openSync(candidate, "wx", 0o600);
-      closeSync(descriptor);
+      linkSync(sourcePath, candidate);
       return candidate;
     } catch (error) {
       if (!isExistingPathError(error)) throw error;
