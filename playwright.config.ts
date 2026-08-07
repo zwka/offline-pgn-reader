@@ -1,7 +1,10 @@
 import { defineConfig, devices } from "@playwright/test";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 
 const port = process.env.PGNREADER_TEST_PORT ?? "8642";
 const baseURL = `http://127.0.0.1:${port}`;
+const browserDataDir = join(tmpdir(), `offline-pgn-reader-playwright-${process.pid}`);
 
 export default defineConfig({
   testDir: "tests/browser",
@@ -15,7 +18,11 @@ export default defineConfig({
   },
   webServer: {
     command: "npm run dev",
-    env: { PGNREADER_PORT: port },
+    env: {
+      PGNREADER_DATA_DIR: browserDataDir,
+      PGNREADER_PORT: port,
+      PGNREADER_WATCH_DIRS: resolve("tests/fixtures"),
+    },
     url: baseURL,
     reuseExistingServer: false,
     timeout: 120_000,

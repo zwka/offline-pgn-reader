@@ -1,5 +1,5 @@
 import { homedir } from "node:os";
-import { isAbsolute, resolve } from "node:path";
+import { delimiter, isAbsolute, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const APP_VERSION = "1.1.0";
@@ -12,6 +12,7 @@ export type AppConfig = {
   version: string;
   frontendDir: string;
   dbPath: string;
+  watchDirs: string[];
 };
 
 function readPort(raw: string | undefined): number {
@@ -33,6 +34,15 @@ function resolveConfiguredPath(raw: string | undefined, fallback: string): strin
   return isAbsolute(expanded) ? expanded : resolve(projectRoot, expanded);
 }
 
+function resolveConfiguredPaths(raw: string | undefined, fallback: string[]): string[] {
+  if (!raw) return fallback;
+  return raw
+    .split(delimiter)
+    .map((value) => value.trim())
+    .filter(Boolean)
+    .map((value) => resolveConfiguredPath(value, value));
+}
+
 export function readConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const dataDir = resolveConfiguredPath(env.PGNREADER_DATA_DIR, resolve(projectRoot, "data"));
   return {
@@ -41,6 +51,10 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     version: APP_VERSION,
     frontendDir: fileURLToPath(new URL("../frontend/", import.meta.url)),
     dbPath: resolve(dataDir, "index.sqlite3"),
+    watchDirs: resolveConfiguredPaths(env.PGNREADER_WATCH_DIRS, [
+      resolve(projectRoot, "samples"),
+      resolve(projectRoot, "library"),
+    ]),
   };
 }
 

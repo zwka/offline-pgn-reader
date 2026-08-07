@@ -72,6 +72,9 @@ async function libraryView() {
   app.appendChild(h("div", { class: "loading" }, h("span", { class: "spinner" }), "Loading library…"));
 
   let pollTimer = null;
+  let intakeError = null;
+  let renderedFiles = [];
+  let renderedDiscovered = [];
   cleanupCurrentView = () => clearTimeout(pollTimer);
 
   async function refresh() {
@@ -83,8 +86,20 @@ async function libraryView() {
       return;
     }
     render(files, discovered);
-    if (files.some((f) => f.scan_status === "scanning" || f.scan_status === "pending")) {
+    if (files.some((f) => f.scan_status === "scanning")) {
       pollTimer = setTimeout(refresh, 700);
+    }
+  }
+
+  async function registerSource(path, onSuccess = () => {}) {
+    try {
+      await api.registerFile(path);
+      intakeError = null;
+      onSuccess();
+      await refresh();
+    } catch (err) {
+      intakeError = err instanceof Error ? err.message : String(err);
+      render(renderedFiles, renderedDiscovered);
     }
   }
 
@@ -136,6 +151,8 @@ async function libraryView() {
   }
 
   function render(files, discovered) {
+    renderedFiles = files;
+    renderedDiscovered = discovered;
     const unregistered = discovered.filter((d) => !d.registered);
     app.textContent = "";
     app.appendChild(
@@ -154,6 +171,7 @@ async function libraryView() {
           "section",
           { class: "lib-section" },
           h("h2", {}, "Add files"),
+          intakeError ? h("div", { class: "error-text", role: "alert" }, intakeError) : null,
           h(
             "div",
             { class: "add-row" },
@@ -163,11 +181,7 @@ async function libraryView() {
               onclick: async () => {
                 const input = document.getElementById("path-input");
                 if (!input.value.trim()) return;
-                try {
-                  await api.registerFile(input.value.trim());
-                  input.value = "";
-                  refresh();
-                } catch (err) { alert(err.message); }
+                await registerSource(input.value.trim(), () => { input.value = ""; });
               },
             }, "Index path"),
             h("label", { class: "ghost-btn", style: "cursor:pointer" },
@@ -196,12 +210,12 @@ async function libraryView() {
                     h("span", { class: "muted" }, fmtBytes(d.size)),
                     h("button", {
                       class: "ghost-btn",
-                      onclick: async () => { await api.registerFile(d.path); refresh(); },
+                      onclick: async () => { await registerSource(d.path); },
                     }, "Index")
                   )
                 )
               )
-            : null
+              : h("div", { class: "empty-note" }, "No unregistered PGN sources found.")
         )
       )
     );
