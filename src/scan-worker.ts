@@ -30,7 +30,7 @@ type ErrorMessage = {
 
 type ScanWorkerMessage = ProgressMessage | CompleteMessage | ErrorMessage;
 
-const data = workerData as ScanWorkerData;
+const scanData = workerData as ScanWorkerData;
 
 function post(message: ScanWorkerMessage): void {
   parentPort?.postMessage(message);
@@ -39,12 +39,12 @@ function post(message: ScanWorkerMessage): void {
 async function run(): Promise<void> {
   if (!parentPort) throw new Error("scan worker has no parent port");
 
-  const database = openSqliteConnection(data.dbPath);
+  const database = openSqliteConnection(scanData.dbPath);
   try {
-    const startedFingerprint = fingerprintFile(data.sourcePath);
+    const startedFingerprint = fingerprintFile(scanData.sourcePath);
     database.exec("BEGIN");
     try {
-      database.prepare("DELETE FROM games WHERE file_id=?").run(data.fileId);
+      database.prepare("DELETE FROM games WHERE file_id=?").run(scanData.fileId);
 
       const insert = database.prepare(
         `INSERT INTO games(
@@ -57,10 +57,10 @@ async function run(): Promise<void> {
       let count = 0;
       let warningCount = 0;
 
-      for await (const game of scanPgn(data.sourcePath, (bytesDone, bytesTotal, gamesFound) => {
+      for await (const game of scanPgn(scanData.sourcePath, (bytesDone, bytesTotal, gamesFound) => {
         post({ type: "progress", bytesDone, bytesTotal, gamesFound });
       })) {
-        batch.push(gameRow(data.fileId, game));
+        batch.push(gameRecordValues(scanData.fileId, game));
         count += 1;
         if (game.warning) warningCount += 1;
         if (batch.length >= INSERT_BATCH_SIZE) {
@@ -70,11 +70,11 @@ async function run(): Promise<void> {
       }
       if (batch.length > 0) insertBatch(insert, batch);
 
-      const finishedFingerprint = fingerprintFile(data.sourcePath);
+      const finishedFingerprint = fingerprintFile(scanData.sourcePath);
       if (finishedFingerprint !== startedFingerprint) {
         throw new Error("source changed during scan");
       }
-      const finishedStats = fileStats(data.sourcePath);
+      const finishedStats = fileStats(scanData.sourcePath);
       database
         .prepare(
           `UPDATE files SET size=?, mtime_ns=?, fingerprint=?, game_count=?,
@@ -87,7 +87,7 @@ async function run(): Promise<void> {
           finishedFingerprint,
           count,
           warningCount,
-          data.fileId,
+          scanData.fileId,
         );
       database.exec("COMMIT");
     } catch (error) {
@@ -100,7 +100,7 @@ async function run(): Promise<void> {
   }
 }
 
-function gameRow(fileId: number, game: ScannedGame): unknown[] {
+function gameRecordValues(fileId: number, game: ScannedGame): unknown[] {
   const tags = new Map(game.headers);
   return [
     fileId,

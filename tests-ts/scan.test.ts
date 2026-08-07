@@ -54,14 +54,12 @@ describe("normal PGN scanning", () => {
       payload: { path: sourcePath },
     });
     expect(response.statusCode).toBe(201);
-    expect(["scanning", "ready"]).toContain(response.json().scan_status);
-    if (response.json().scan_status === "scanning") {
-      expect(response.json().progress).toMatchObject({
-        bytesDone: 0,
-        bytesTotal: readFileSync(sourcePath).byteLength,
-        gamesFound: 0,
-      });
-    }
+    expect(response.json().scan_status).toBe("scanning");
+    expect(response.json().progress).toMatchObject({
+      bytesDone: 0,
+      bytesTotal: readFileSync(sourcePath).byteLength,
+      gamesFound: 0,
+    });
 
     const record = await waitForReady(server, response.json().id);
     expect(record).toMatchObject({

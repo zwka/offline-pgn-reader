@@ -32,7 +32,7 @@ type FileRow = {
   scanned_at: string | null;
 };
 
-type GameListRow = {
+type GameRecordRow = {
   id: number;
   idx_in_file: number;
   event: string;
@@ -176,7 +176,7 @@ export class LibraryService {
            FROM games WHERE ${whereSql}
            ORDER BY idx_in_file LIMIT ? OFFSET ?`,
         )
-        .all(...params, normalizedLimit, normalizedOffset) as GameListRow[];
+        .all(...params, normalizedLimit, normalizedOffset) as GameRecordRow[];
       return {
         total,
         offset: normalizedOffset,

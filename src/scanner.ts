@@ -9,6 +9,7 @@ import { createHash } from "node:crypto";
 
 const BOM = Buffer.from([0xef, 0xbb, 0xbf]);
 const DEFAULT_PROGRESS_BYTES = 4 * 1024 * 1024;
+const MAX_TAG_LINE_BYTES = 64 * 1024;
 
 export type TagPair = [name: string, value: string];
 
@@ -36,7 +37,16 @@ export async function* scanPgn(
   let inComment = false;
   let contentEnd = 0;
   let gamesFound = 0;
-  let firstLine = true;
+  let lineStart = 0;
+  let lineByteCount = 0;
+  let lineFirstByte: number | null = null;
+  let linePreviousByte = -1;
+  let lineLastByte = -1;
+  let linePreview: number[] = [];
+  let lineTooLong = false;
+  let lineCommentAtStart = false;
+  let lineCommentState = false;
+  let lineStoppedAtSemicolon = false;
 
   const closeCurrent = (): ScannedGame | null => {
     if (!current) return null;
@@ -46,38 +56,38 @@ export async function* scanPgn(
     return done;
   };
 
-  for await (const raw of rawLines(path)) {
-    const lineStart = offset;
-    offset += raw.length;
+  const resetLine = (start: number): void => {
+    lineStart = start;
+    lineByteCount = 0;
+    lineFirstByte = null;
+    linePreviousByte = -1;
+    lineLastByte = -1;
+    linePreview = [];
+    lineTooLong = false;
+    lineCommentAtStart = inComment;
+    lineCommentState = inComment;
+    lineStoppedAtSemicolon = false;
+  };
 
-    let rawForText = raw;
-    if (firstLine) {
-      firstLine = false;
-      if (rawForText.subarray(0, BOM.length).equals(BOM)) {
-        rawForText = rawForText.subarray(BOM.length);
-      }
-    }
-
-    const text = rawForText.toString("utf8").replace(/[\r\n]+$/g, "");
-    const blank = text.trim().length === 0;
-
-    if (progress && offset >= nextProgress) {
-      nextProgress = offset + progressEveryBytes;
-      progress(offset, size, gamesFound);
-    }
+  const processLine = (): ScannedGame | null => {
+    const text = lineTooLong
+      ? ""
+      : Buffer.from(linePreview).toString("utf8").replace(/[\r\n]+$/g, "");
+    const blank = !lineTooLong && text.trim().length === 0;
 
     if (blank) {
       if (current && current.headers.length > 0 && !hasMovetext) blankAfterTags = true;
-      continue;
+      return null;
     }
 
-    const tag = inComment ? null : parseTag(text);
+    let completed: ScannedGame | null = null;
+    const tag = lineCommentAtStart || lineTooLong ? null : parseTag(text);
     if (tag) {
       if (current && (hasMovetext || (blankAfterTags && tag[0] === "Event"))) {
         const done = closeCurrent();
         if (done) {
           gamesFound += 1;
-          yield done;
+          completed = done;
         }
       }
       if (!current) {
@@ -93,11 +103,13 @@ export async function* scanPgn(
         inComment = false;
       }
       current.headers.push(tag);
-      contentEnd = offset - trailingNewlineLength(raw);
-      continue;
+      contentEnd = offset - trailingNewlineLength(linePreviousByte, lineLastByte);
+      return completed;
     }
 
-    if (!inComment && raw.length > 0 && raw[0] === 0x25) continue;
+    if (!lineCommentAtStart && lineFirstByte === 0x25) {
+      return completed;
+    }
 
     if (!current) {
       current = {
@@ -110,8 +122,77 @@ export async function* scanPgn(
       blankAfterTags = false;
     }
     hasMovetext = true;
-    inComment = scanMovetextLine(text, inComment);
-    contentEnd = offset - trailingNewlineLength(raw);
+    inComment = lineCommentState;
+    contentEnd = offset - trailingNewlineLength(linePreviousByte, lineLastByte);
+    return completed;
+  };
+
+  const processBytes = (bytes: Buffer): ScannedGame[] => {
+    const completed: ScannedGame[] = [];
+    for (const byte of bytes) {
+      offset += 1;
+      if (byte === 0x0a) {
+        lineByteCount += 1;
+        linePreviousByte = lineLastByte;
+        lineLastByte = byte;
+        const done = processLine();
+        if (done) completed.push(done);
+        resetLine(offset);
+        continue;
+      }
+
+      lineByteCount += 1;
+      linePreviousByte = lineLastByte;
+      lineLastByte = byte;
+      if (lineFirstByte === null) lineFirstByte = byte;
+      if (!lineTooLong) {
+        if (linePreview.length < MAX_TAG_LINE_BYTES) linePreview.push(byte);
+        else lineTooLong = true;
+      }
+      if (!lineStoppedAtSemicolon) {
+        if (lineCommentState) {
+          if (byte === 0x7d) lineCommentState = false;
+        } else if (byte === 0x7b) {
+          lineCommentState = true;
+        } else if (byte === 0x3b) {
+          lineStoppedAtSemicolon = true;
+        }
+      }
+    }
+    return completed;
+  };
+
+  resetLine(0);
+  let prefix = Buffer.alloc(0);
+  let prefixResolved = false;
+  for await (const chunk of createReadStream(path)) {
+    let bytes = chunk as Buffer;
+    if (!prefixResolved) {
+      const needed = BOM.length - prefix.length;
+      const prefixPart = bytes.subarray(0, needed);
+      prefix = prefix.length === 0 ? Buffer.from(prefixPart) : Buffer.concat([prefix, prefixPart]);
+      bytes = bytes.subarray(prefixPart.length);
+      if (prefix.length < BOM.length) continue;
+      prefixResolved = true;
+      if (prefix.equals(BOM)) {
+        offset = BOM.length;
+      } else {
+        bytes = Buffer.concat([prefix, bytes]);
+      }
+    }
+    for (const done of processBytes(bytes)) yield done;
+    if (progress && offset >= nextProgress) {
+      nextProgress = offset + progressEveryBytes;
+      progress(offset, size, gamesFound);
+    }
+  }
+
+  if (!prefixResolved) {
+    for (const done of processBytes(prefix)) yield done;
+  }
+  if (lineByteCount > 0) {
+    const done = processLine();
+    if (done) yield done;
   }
 
   const done = closeCurrent();
@@ -141,8 +222,7 @@ export function readGameBytes(
       if (count === 0) break;
       bytesRead += count;
     }
-    const result = bytesRead === length ? data : data.subarray(0, bytesRead);
-    return result.subarray(0, BOM.length).equals(BOM) ? result.subarray(BOM.length) : result;
+    return bytesRead === length ? data : data.subarray(0, bytesRead);
   } finally {
     closeSync(descriptor);
   }
@@ -164,25 +244,6 @@ export function fingerprintFile(path: string, sampleBytes = 64 * 1024): string {
   return hash.digest("hex");
 }
 
-async function* rawLines(path: string): AsyncGenerator<Buffer> {
-  const stream = createReadStream(path);
-  let pending = Buffer.alloc(0);
-
-  for await (const chunk of stream) {
-    const next = pending.length === 0 ? chunk : Buffer.concat([pending, chunk]);
-    let lineStart = 0;
-    let newline = next.indexOf(0x0a, lineStart);
-    while (newline >= 0) {
-      yield next.subarray(lineStart, newline + 1);
-      lineStart = newline + 1;
-      newline = next.indexOf(0x0a, lineStart);
-    }
-    pending = next.subarray(lineStart);
-  }
-
-  if (pending.length > 0) yield pending;
-}
-
 function parseTag(text: string): TagPair | null {
   const match = /^\s*\[\s*([A-Za-z][A-Za-z0-9_]*)\s+"((?:[^"\\]|\\.)*)"\s*\]\s*$/.exec(text);
   if (!match) return null;
@@ -193,26 +254,11 @@ function unescapeTagValue(value: string): string {
   return value.replaceAll('\\"', '"').replaceAll("\\\\", "\\");
 }
 
-function scanMovetextLine(line: string, inComment: boolean): boolean {
-  if (inComment && !line.includes("}")) return true;
-  if (!inComment && !line.includes("{") && !line.includes(";")) return false;
-  for (const character of line) {
-    if (inComment) {
-      if (character === "}") inComment = false;
-    } else if (character === "{") {
-      inComment = true;
-    } else if (character === ";") {
-      break;
-    }
-  }
-  return inComment;
-}
-
-function trailingNewlineLength(raw: Buffer): number {
-  if (raw.length >= 2 && raw[raw.length - 2] === 0x0d && raw[raw.length - 1] === 0x0a) {
+function trailingNewlineLength(previousByte: number, lastByte: number): number {
+  if (previousByte === 0x0d && lastByte === 0x0a) {
     return 2;
   }
-  if (raw.length > 0 && (raw[raw.length - 1] === 0x0a || raw[raw.length - 1] === 0x0d)) {
+  if (lastByte === 0x0a || lastByte === 0x0d) {
     return 1;
   }
   return 0;

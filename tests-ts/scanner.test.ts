@@ -83,12 +83,15 @@ describe("PGN source scanner", () => {
     expect(games).toHaveLength(2);
     expect(games[0].offsetStart).toBe(0);
     expect(games[0].headers[0]).toEqual(["Event", "BOM Game"]);
-    expect(
-      readGameBytes(path, games[0].offsetStart, games[0].offsetEnd, 8 * 1024 * 1024).toString(),
-    ).toMatch(/^\[Event "BOM Game"\]/);
-    expect(
-      readGameBytes(path, games[0].offsetStart, games[0].offsetEnd, 8 * 1024 * 1024).toString(),
-    ).toContain("déjà vu");
+    const firstGameBytes = readGameBytes(
+      path,
+      games[0].offsetStart,
+      games[0].offsetEnd,
+      8 * 1024 * 1024,
+    );
+    expect(firstGameBytes.subarray(0, 3)).toEqual(Buffer.from([0xef, 0xbb, 0xbf]));
+    expect(firstGameBytes.subarray(3).toString()).toMatch(/^\[Event "BOM Game"\]/);
+    expect(firstGameBytes.toString()).toContain("déjà vu");
   });
 
   it("ignores escape lines and flags a tagless game", async () => {
@@ -145,6 +148,22 @@ describe("PGN source scanner", () => {
       ["White", "Player"],
       ["White", "Final"],
     ]);
+  });
+
+  it("handles a very long single-line movetext without changing the boundary", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "offline-pgn-reader-scanner-"));
+    temporaryDirectories.push(directory);
+    const path = join(directory, "long-line.pgn");
+    writeFileSync(
+      path,
+      '[Event "Long"]\n[White "Player"]\n[Black "Opponent"]\n\n' +
+        `1. ${"e4 ".repeat(250_000)}*\n`,
+    );
+
+    const games = await scan(path);
+    expect(games).toHaveLength(1);
+    expect(games[0].headers[0]).toEqual(["Event", "Long"]);
+    expect(games[0].offsetEnd).toBe(readFileSync(path).byteLength - 1);
   });
 
   it("reports final progress and fingerprints source changes", async () => {
