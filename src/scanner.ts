@@ -10,6 +10,7 @@ import { createHash } from "node:crypto";
 const BOM = Buffer.from([0xef, 0xbb, 0xbf]);
 const DEFAULT_PROGRESS_BYTES = 4 * 1024 * 1024;
 const MAX_LINE_PREVIEW_BYTES = 64 * 1024;
+const TAG_VALUE_START_RE = /^\s*\[\s*[A-Za-z][A-Za-z0-9_]*\s+"$/;
 
 export type TagPair = [name: string, value: string];
 
@@ -46,6 +47,7 @@ export async function* scanPgn(
   let linePreviewTruncated = false;
   let lineHasNonWhitespace = false;
   let lineMayBeTag = false;
+  let lineTagValueStarted = false;
   let lineCommentAtStart = false;
   let lineCommentState = false;
   let lineStoppedAtSemicolon = false;
@@ -68,6 +70,7 @@ export async function* scanPgn(
     linePreviewTruncated = false;
     lineHasNonWhitespace = false;
     lineMayBeTag = false;
+    lineTagValueStarted = false;
     lineCommentAtStart = inComment;
     lineCommentState = inComment;
     lineStoppedAtSemicolon = false;
@@ -154,8 +157,15 @@ export async function* scanPgn(
         lineMayBeTag = !lineCommentAtStart && byte === 0x5b;
       }
       if (!linePreviewTruncated) {
-        if (lineMayBeTag || linePreview.length < MAX_LINE_PREVIEW_BYTES) linePreview.push(byte);
-        else linePreviewTruncated = true;
+        linePreview.push(byte);
+        if (lineMayBeTag && !lineTagValueStarted && byte === 0x22) {
+          lineTagValueStarted = TAG_VALUE_START_RE.test(
+            Buffer.from(linePreview).toString("utf8"),
+          );
+        }
+        if (!lineTagValueStarted && linePreview.length >= MAX_LINE_PREVIEW_BYTES) {
+          linePreviewTruncated = true;
+        }
       }
       if (!lineStoppedAtSemicolon) {
         if (lineCommentState) {
