@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -130,6 +130,69 @@ describe("normal PGN scanning", () => {
         "1/2-1/2",
       );
       expect(rows[0].has_fen).toBe(0);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("indexes difficult source bytes, warnings, and later game records", async () => {
+    const { directory, server } = testServer();
+    servers.push(server);
+    const corpus = JSON.parse(
+      readFileSync(join(resolve("tests/fixtures"), "scan_corpus.json"), "utf8"),
+    ) as {
+      cases: Array<{
+        name: string;
+        source?: string;
+        games?: Array<{ idxInFile: number; offsetStart: number; offsetEnd: number }>;
+      }>;
+    };
+    const difficult = corpus.cases.find((corpusCase) => corpusCase.name === "difficult-source");
+    if (!difficult?.source || !difficult.games) throw new Error("difficult scan corpus case is missing");
+    const sourcePath = join(directory, "difficult-source.pgn");
+    const source = Buffer.from(difficult.source, "utf8");
+    writeFileSync(sourcePath, source);
+
+    const response = await server.inject({
+      method: "POST",
+      url: "/api/files",
+      payload: { path: sourcePath },
+    });
+    const record = await waitForReady(server, response.json().id);
+    expect(record).toMatchObject({ game_count: 5, warning_count: 1, scan_status: "ready" });
+
+    const page = await server.inject({
+      method: "GET",
+      url: `/api/files/${record.id}/games?offset=0&limit=100`,
+    });
+    expect(page.json().games).toEqual([
+      expect.objectContaining({ idx_in_file: 0, event: "", warning: "movetext with no tag section" }),
+      expect.objectContaining({ idx_in_file: 1, event: "Duplicate final", white: "Final White" }),
+      expect.objectContaining({ idx_in_file: 2, event: "Malformed middle" }),
+      expect.objectContaining({ idx_in_file: 3, event: "Headers only" }),
+      expect.objectContaining({ idx_in_file: 4, event: "After headers", white: "Final game" }),
+    ]);
+
+    const database = new Database(join(directory, "index.sqlite3"));
+    try {
+      const rows = database
+        .prepare("SELECT idx_in_file, offset_start, offset_end FROM games ORDER BY idx_in_file")
+        .all() as Array<{ idx_in_file: number; offset_start: number; offset_end: number }>;
+      expect(rows).toHaveLength(difficult.games.length);
+      expect(rows.map(({ idx_in_file, offset_start, offset_end }) => ({
+        idxInFile: idx_in_file,
+        offsetStart: offset_start,
+        offsetEnd: offset_end,
+      }))).toEqual(difficult.games.map(({ idxInFile, offsetStart, offsetEnd }) => ({
+        idxInFile,
+        offsetStart,
+        offsetEnd,
+      })));
+      expect(rows.map(({ offset_start, offset_end }) =>
+        source.subarray(offset_start, offset_end).toString("utf8"))).toEqual([
+        ...difficult.games.map(({ offsetStart, offsetEnd }) =>
+          source.subarray(offsetStart, offsetEnd).toString("utf8")),
+      ]);
     } finally {
       database.close();
     }

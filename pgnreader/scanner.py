@@ -191,8 +191,6 @@ def read_game_bytes(path: Path, offset_start: int, offset_end: int, max_bytes: i
     with path.open("rb") as f:
         f.seek(offset_start)
         data = f.read(length)
-    if data.startswith(_BOM):
-        data = data[len(_BOM):]
     return data
 
 

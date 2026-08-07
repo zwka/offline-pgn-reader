@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import json
 import os
 
 import pytest
 
 from pgnreader.service import NotFound, ServiceError
+
+from .conftest import FIXTURES
 
 
 def register_and_scan(service, path):
@@ -105,6 +108,34 @@ def test_malformed_file_scan_records_index_warning(service, tmp_path):
     games = service.list_games(info["id"])["games"]
     doc = service.get_game_document(games[0]["id"])
     assert any("index warning" in w for w in doc["warnings"])
+
+
+def test_difficult_source_index_and_later_game_reads(service, tmp_path):
+    corpus = json.loads((FIXTURES / "scan_corpus.json").read_text(encoding="utf-8"))
+    case = next(case for case in corpus["cases"] if case["name"] == "difficult-source")
+    p = tmp_path / "difficult-source.pgn"
+    p.write_bytes(case["source"].encode("utf-8"))
+
+    info = register_and_scan(service, p)
+    assert info["game_count"] == 5
+    assert info["warning_count"] == 1
+
+    games = service.list_games(info["id"])["games"]
+    assert [(game["idx_in_file"], game["event"], game["warning"]) for game in games] == [
+        (0, "", "movetext with no tag section"),
+        (1, "Duplicate final", None),
+        (2, "Malformed middle", None),
+        (3, "Headers only", None),
+        (4, "After headers", None),
+    ]
+
+    malformed = service.get_game_document(games[2]["id"])
+    assert malformed["warnings"]
+    later = service.get_game_document(games[4]["id"])
+    assert dict(later["headers"])["White"] == "Final game"
+    expected = case["games"][4]
+    expected_source = p.read_bytes()[expected["offsetStart"] : expected["offsetEnd"]].decode("utf-8")
+    assert service.get_game_source(games[4]["id"]) == expected_source
 
 
 def test_remove_file(service, fixture_copy):

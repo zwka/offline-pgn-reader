@@ -32,7 +32,8 @@ class GameParseError(Exception):
 
 def hydrate_game(source_bytes: bytes, extra_warnings: list[str] | None = None) -> GameDocument:
     source = source_bytes.decode("utf-8", errors="replace")
-    parse_text, _ = _promote_semicolon_comments(source)
+    # Keep the decoded source exact, but do not let a UTF-8 BOM become movetext.
+    parse_text, _ = _promote_semicolon_comments(source.removeprefix("\ufeff"))
     game = chess.pgn.read_game(io.StringIO(parse_text))
     if game is None:
         raise GameParseError("no PGN game found in source span")

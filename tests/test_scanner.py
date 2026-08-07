@@ -11,10 +11,20 @@ from pgnreader.scanner import fingerprint_file, read_game_bytes, scan_pgn
 from .conftest import FIXTURES
 
 MAX = 8 * 1024 * 1024
+SCAN_CORPUS = json.loads((FIXTURES / "scan_corpus.json").read_text(encoding="utf-8"))["cases"]
 
 
 def scan(path):
     return list(scan_pgn(path))
+
+
+def corpus_source(case):
+    if "source" in case:
+        return case["source"]
+    return "".join(
+        case["template"].replace("{{index}}", str(index).zfill(4))
+        for index in range(case["repeat"])
+    )
 
 
 def test_two_games_boundaries_and_headers(fixture_copy):
@@ -38,6 +48,54 @@ def test_shared_scan_contract_matches_the_python_oracle():
         assert actual.offset_end == expected["offsetEnd"]
         assert actual.headers == [tuple(pair) for pair in expected["headers"]]
         assert actual.warning == expected["warning"]
+
+
+def test_shared_difficult_source_corpus_is_byte_exact(tmp_path):
+    for case in SCAN_CORPUS:
+        source = corpus_source(case)
+        path = tmp_path / f"{case['name']}.pgn"
+        path.write_bytes(source.encode("utf-8"))
+        games = scan(path)
+
+        if case["games"]:
+            assert [
+                {
+                    "idxInFile": game.idx_in_file,
+                    "offsetStart": game.offset_start,
+                    "offsetEnd": game.offset_end,
+                    "headers": [list(pair) for pair in game.headers],
+                    "warning": game.warning,
+                }
+                for game in games
+            ] == case["games"]
+            source_bytes = path.read_bytes()
+            for expected in case["games"]:
+                actual_bytes = read_game_bytes(
+                    path, expected["offsetStart"], expected["offsetEnd"], MAX
+                )
+                assert actual_bytes == source_bytes[expected["offsetStart"] : expected["offsetEnd"]]
+                assert actual_bytes.decode("utf-8") == source_bytes[
+                    expected["offsetStart"] : expected["offsetEnd"]
+                ].decode("utf-8")
+        else:
+            assert len(games) == case["repeat"]
+            for index, game in enumerate(games):
+                value = str(index).zfill(4)
+                assert game.idx_in_file == index
+                assert game.offset_start == index * case["recordBytes"]
+                assert game.offset_end == (index + 1) * case["recordBytes"] - 2
+                assert game.headers == [
+                    ("Event", f"Bulk {value}"),
+                    ("Site", "Generated"),
+                    ("Round", value),
+                    ("White", f"Player {value}"),
+                    ("Black", f"Opponent {value}"),
+                    ("Result", "1-0"),
+                ]
+                assert game.warning is None
+
+        for expected_text in case["sourceContains"]:
+            assert expected_text in source
 
 
 def test_offsets_reread_exact_spans(fixture_copy):

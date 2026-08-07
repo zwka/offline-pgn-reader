@@ -22,6 +22,26 @@ const scanContract = JSON.parse(
 const fixtureDirectory = resolve("tests/fixtures");
 const temporaryDirectories: string[] = [];
 
+type ScanCorpusCase = {
+  name: string;
+  source?: string;
+  repeat?: number;
+  template?: string;
+  recordBytes: number;
+  games: Array<{
+    idxInFile: number;
+    offsetStart: number;
+    offsetEnd: number;
+    headers: ScannedGame["headers"];
+    warning: string | null;
+  }>;
+  sourceContains: string[];
+};
+
+const scanCorpus = JSON.parse(
+  readFileSync(join(fixtureDirectory, "scan_corpus.json"), "utf8"),
+) as { cases: ScanCorpusCase[] };
+
 afterEach(() => {
   temporaryDirectories.splice(0).forEach((directory) => {
     rmSync(directory, { force: true, recursive: true });
@@ -34,11 +54,72 @@ async function scan(path: string) {
   return games;
 }
 
+function corpusSource(corpusCase: ScanCorpusCase): string {
+  if (corpusCase.source !== undefined) return corpusCase.source;
+  if (corpusCase.template === undefined || corpusCase.repeat === undefined) {
+    throw new Error(`invalid scan corpus case: ${corpusCase.name}`);
+  }
+  return Array.from({ length: corpusCase.repeat }, (_, index) =>
+    corpusCase.template!.replaceAll("{{index}}", String(index).padStart(4, "0")),
+  ).join("");
+}
+
 describe("PGN source scanner", () => {
   it("matches the shared Python scan contract", async () => {
     const games = await scan(join(fixtureDirectory, scanContract.source));
 
     expect(games).toEqual(scanContract.games);
+  });
+
+  it("matches the shared difficult-source corpus byte-for-byte", async () => {
+    for (const corpusCase of scanCorpus.cases) {
+      const directory = mkdtempSync(join(tmpdir(), "offline-pgn-reader-corpus-"));
+      temporaryDirectories.push(directory);
+      const sourceText = corpusSource(corpusCase);
+      const sourceBytes = Buffer.from(sourceText, "utf8");
+      const path = join(directory, `${corpusCase.name}.pgn`);
+      writeFileSync(path, sourceBytes);
+
+      const games = await scan(path);
+      if (corpusCase.games.length > 0) {
+        expect(games).toEqual(corpusCase.games);
+        for (const expected of corpusCase.games) {
+          const actualBytes = readGameBytes(
+            path,
+            expected.offsetStart,
+            expected.offsetEnd,
+            8 * 1024 * 1024,
+          );
+          expect(actualBytes).toEqual(sourceBytes.subarray(expected.offsetStart, expected.offsetEnd));
+          expect(actualBytes.toString("utf8")).toBe(
+            sourceBytes.subarray(expected.offsetStart, expected.offsetEnd).toString("utf8"),
+          );
+        }
+      } else {
+        expect(corpusCase.repeat).toBeDefined();
+        expect(games).toHaveLength(corpusCase.repeat!);
+        for (const [index, game] of games.entries()) {
+          const value = String(index).padStart(4, "0");
+          expect(game).toEqual({
+            idxInFile: index,
+            offsetStart: index * corpusCase.recordBytes,
+            offsetEnd: (index + 1) * corpusCase.recordBytes - 2,
+            headers: [
+              ["Event", `Bulk ${value}`],
+              ["Site", "Generated"],
+              ["Round", value],
+              ["White", `Player ${value}`],
+              ["Black", `Opponent ${value}`],
+              ["Result", "1-0"],
+            ],
+            warning: null,
+          });
+        }
+      }
+      for (const expectedText of corpusCase.sourceContains) {
+        expect(sourceText).toContain(expectedText);
+      }
+    }
   });
 
   it("finds normal game boundaries and preserves ordered tag pairs", async () => {

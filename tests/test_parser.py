@@ -136,6 +136,16 @@ def test_source_round_trip_is_exact():
     assert doc.source in original  # byte-exact slice of the file
 
 
+def test_bom_source_is_preserved_while_game_hydration_recovers_headers(crlf_bom_pgn):
+    game = list(scan_pgn(crlf_bom_pgn))[0]
+    data = read_game_bytes(crlf_bom_pgn, game.offset_start, game.offset_end, MAX)
+
+    assert data.startswith(b"\xef\xbb\xbf")
+    doc = hydrate_game(data)
+    assert doc.source == data.decode("utf-8")
+    assert dict(doc.headers)["Event"] == "BOM Game"
+
+
 def test_normalized_reexport_preserves_tree():
     """Exporting via python-chess and re-hydrating yields an identical tree."""
     doc = hydrate_fixture("variations.pgn")

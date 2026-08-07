@@ -1,0 +1,84 @@
+{
+  "cases": [
+    {
+      "name": "difficult-source",
+      "source": "\ufeff1. e4 ??? *\r\n\r\n[Event \"Difficult first\"]\r\n[Event \"Duplicate final\"]\r\n[Site \"M\u00fcnchen\"]\r\n[Date \"2026.08.08\"]\r\n[Round \"1\"]\r\n[White \"Jos\u00e9 \u00c1lvarez\"]\r\n[White \"Final White\"]\r\n[Black \"Bj\u00f6rk\"]\r\n[Result \"*\"]\r\n\r\n{pre-game comment with d\u00e9j\u00e0 vu\r\n[Event \"not a tag inside comment\"]\r\nclosed here} 1. e4 e5 ; semicolon { not a brace\r\n2. Nf3 *\r\n\r\n[Event \"Malformed middle\"]\r\n[Site \"?\"]\r\n[White \"Broken\"]\r\n[Black \"Recoverable\"]\r\n[Result \"*\"]\r\n\r\n1. e4 e5 2. Zz9 xx7 *\r\n\r\n[Event \"Headers only\"]\r\n[White \"No moves\"]\r\n[Result \"*\"]\r\n\r\n[Event \"After headers\"]\r\n[White \"Final game\"]\r\n[Black \"Reader\"]\r\n[Result \"1-0\"]\r\n\r\n1. d4 d5 *",
+      "games": [
+        {
+          "idxInFile": 0,
+          "offsetStart": 0,
+          "offsetEnd": 14,
+          "headers": [],
+          "warning": "movetext with no tag section"
+        },
+        {
+          "idxInFile": 1,
+          "offsetStart": 18,
+          "offsetEnd": 335,
+          "headers": [
+            ["Event", "Difficult first"],
+            ["Event", "Duplicate final"],
+            ["Site", "M\u00fcnchen"],
+            ["Date", "2026.08.08"],
+            ["Round", "1"],
+            ["White", "Jos\u00e9 \u00c1lvarez"],
+            ["White", "Final White"],
+            ["Black", "Bj\u00f6rk"],
+            ["Result", "*"]
+          ],
+          "warning": null
+        },
+        {
+          "idxInFile": 2,
+          "offsetStart": 339,
+          "offsetEnd": 457,
+          "headers": [
+            ["Event", "Malformed middle"],
+            ["Site", "?"],
+            ["White", "Broken"],
+            ["Black", "Recoverable"],
+            ["Result", "*"]
+          ],
+          "warning": null
+        },
+        {
+          "idxInFile": 3,
+          "offsetStart": 461,
+          "offsetEnd": 517,
+          "headers": [
+            ["Event", "Headers only"],
+            ["White", "No moves"],
+            ["Result", "*"]
+          ],
+          "warning": null
+        },
+        {
+          "idxInFile": 4,
+          "offsetStart": 521,
+          "offsetEnd": 614,
+          "headers": [
+            ["Event", "After headers"],
+            ["White", "Final game"],
+            ["Black", "Reader"],
+            ["Result", "1-0"]
+          ],
+          "warning": null
+        }
+      ],
+      "sourceContains": [
+        "\ufeff1. e4 ??? *",
+        "M\u00fcnchen",
+        "d\u00e9j\u00e0 vu",
+        "1. d4 d5 *"
+      ]
+    },
+    {
+      "name": "large-source",
+      "repeat": 4096,
+      "template": "[Event \"Bulk {{index}}\"]\n[Site \"Generated\"]\n[Round \"{{index}}\"]\n[White \"Player {{index}}\"]\n[Black \"Opponent {{index}}\"]\n[Result \"1-0\"]\n\n1. e4 e5 *\n\n",
+      "recordBytes": 128,
+      "games": [],
+      "sourceContains": ["[Event \"Bulk 0000\"]", "[Event \"Bulk 4095\"]"]
+    }
+  ]
+}
