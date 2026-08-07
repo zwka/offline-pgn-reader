@@ -1,0 +1,36 @@
+{
+  "source": "basic_two_games.pgn",
+  "games": [
+    {
+      "idxInFile": 0,
+      "offsetStart": 0,
+      "offsetEnd": 214,
+      "headers": [
+        ["Event", "Test Open"],
+        ["Site", "Localville"],
+        ["Date", "2024.01.15"],
+        ["Round", "1"],
+        ["White", "Alpha, A."],
+        ["Black", "Beta, B."],
+        ["Result", "1-0"],
+        ["ECO", "C50"]
+      ],
+      "warning": null
+    },
+    {
+      "idxInFile": 1,
+      "offsetStart": 216,
+      "offsetEnd": 394,
+      "headers": [
+        ["Event", "Test Open"],
+        ["Site", "Localville"],
+        ["Date", "2024.01.16"],
+        ["Round", "2"],
+        ["White", "Beta, B."],
+        ["Black", "Alpha, A."],
+        ["Result", "1/2-1/2"]
+      ],
+      "warning": null
+    }
+  ]
+}

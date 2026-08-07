@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import time
+import json
 
 from pgnreader.scanner import fingerprint_file, read_game_bytes, scan_pgn
 
@@ -24,6 +25,19 @@ def test_two_games_boundaries_and_headers(fixture_copy):
     assert games[0].header("ECO") == "C50"
     assert games[1].header("Round") == "2"
     assert games[0].idx_in_file == 0 and games[1].idx_in_file == 1
+
+
+def test_shared_scan_contract_matches_the_python_oracle():
+    contract = json.loads((FIXTURES / "scan_contract.json").read_text(encoding="utf-8"))
+    games = scan(FIXTURES / contract["source"])
+
+    assert len(games) == len(contract["games"])
+    for actual, expected in zip(games, contract["games"]):
+        assert actual.idx_in_file == expected["idxInFile"]
+        assert actual.offset_start == expected["offsetStart"]
+        assert actual.offset_end == expected["offsetEnd"]
+        assert actual.headers == [tuple(pair) for pair in expected["headers"]]
+        assert actual.warning == expected["warning"]
 
 
 def test_offsets_reread_exact_spans(fixture_copy):

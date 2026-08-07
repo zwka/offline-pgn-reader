@@ -17,7 +17,17 @@ test("shows a discovered source and registers it from the Library view", async (
 
   const discovered = page.locator(".discover-list li").filter({ hasText: "basic_two_games.pgn" });
   await expect(discovered).toBeVisible();
+  const registration = page.waitForResponse((response) =>
+    response.url().endsWith("/api/files") && response.request().method() === "POST",
+  );
   await discovered.getByRole("button", { name: "Index" }).click();
+  const registrationBody = await (await registration).json();
+  expect(registrationBody.scan_status).toBe("scanning");
+  expect(registrationBody.progress).toMatchObject({
+    bytesDone: 0,
+    bytesTotal: expect.any(Number),
+    gamesFound: 0,
+  });
 
   const card = page.locator(".file-card").filter({ hasText: "basic_two_games.pgn" });
   await expect(card).toBeVisible();

@@ -6,6 +6,19 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { fingerprintFile, readGameBytes, scanPgn, type ScannedGame } from "../src/scanner.js";
 
+const scanContract = JSON.parse(
+  readFileSync(join(resolve("tests/fixtures"), "scan_contract.json"), "utf8"),
+) as {
+  source: string;
+  games: Array<{
+    idxInFile: number;
+    offsetStart: number;
+    offsetEnd: number;
+    headers: ScannedGame["headers"];
+    warning: string | null;
+  }>;
+};
+
 const fixtureDirectory = resolve("tests/fixtures");
 const temporaryDirectories: string[] = [];
 
@@ -22,6 +35,12 @@ async function scan(path: string) {
 }
 
 describe("PGN source scanner", () => {
+  it("matches the shared Python scan contract", async () => {
+    const games = await scan(join(fixtureDirectory, scanContract.source));
+
+    expect(games).toEqual(scanContract.games);
+  });
+
   it("finds normal game boundaries and preserves ordered tag pairs", async () => {
     const path = join(fixtureDirectory, "basic_two_games.pgn");
     const games = await scan(path);
