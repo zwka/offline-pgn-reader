@@ -1,6 +1,7 @@
 import { expect, test, type Route } from "@playwright/test";
-import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { resolve } from "node:path";
 import { tmpdir } from "node:os";
 
 test("loads the browser shell and reaches the Node health route", async ({ page }) => {
@@ -167,6 +168,57 @@ test("opens a normal Game record and selects moves across the board and notation
     await page.locator(".notation .mv").filter({ hasText: "e5" }).click();
     await expect(page.locator(".notation .mv.current")).toContainText("e5");
     await expect(page.locator('.sq[data-square="e5"] .piece')).toHaveAttribute("alt", "p");
+  } finally {
+    rmSync(directory, { force: true, recursive: true });
+  }
+});
+
+test("navigates recursive variations and FEN-start positions in the reader", async ({ page }) => {
+  const directory = mkdtempSync(join(tmpdir(), "offline-pgn-reader-browser-variations-"));
+  const source = join(directory, "variations-and-fen.pgn");
+  writeFileSync(
+    source,
+    `${readFileSync(resolve("tests/fixtures/variations.pgn"), "utf8")}\n${readFileSync(resolve("tests/fixtures/fen_start.pgn"), "utf8")}`,
+  );
+
+  try {
+    await page.goto("/");
+    await page.locator("#path-input").fill(source);
+    await page.getByRole("button", { name: "Index path" }).click();
+    const card = page.locator(".file-card").filter({ hasText: "variations-and-fen.pgn" });
+    await expect(card).toContainText("2 games", { timeout: 10_000 });
+
+    await card.click();
+    await expect(page.locator(".games-table tbody tr")).toHaveCount(2, { timeout: 10_000 });
+    await page.locator(".games-table tbody tr").nth(0).dispatchEvent("click");
+    await expect(page.locator(".notation .mv")).toHaveCount(17);
+
+    await page.locator(".notation .mv").filter({ hasText: "c5" }).click();
+    await expect(page.locator(".notation .mv.current")).toContainText("c5");
+    await expect(page.locator('.sq[data-square="c5"] .piece')).toHaveAttribute("alt", "p");
+
+    await page.keyboard.press("ArrowRight");
+    await expect(page.locator(".notation .mv.current")).toContainText("Nf3");
+    await page.keyboard.press("ArrowLeft");
+    await expect(page.locator(".notation .mv.current")).toContainText("c5");
+    await page.keyboard.press("ArrowUp");
+    await expect(page.locator(".notation .mv.current")).toContainText("e5");
+    await page.keyboard.press("ArrowDown");
+    await expect(page.locator(".notation .mv.current")).toContainText("c5");
+
+    await page.locator('a[href^="#/file/"]').click();
+    await expect(page.locator(".games-table tbody tr")).toHaveCount(2);
+    await page.locator(".games-table tbody tr").nth(1).dispatchEvent("click");
+    await expect(page.locator(".notation .mv")).toHaveCount(5);
+    await expect(page.locator('.sq[data-square="f7"] .piece')).toHaveAttribute("alt", "R");
+    await expect(page.locator('.sq[data-square="f8"] .piece')).toHaveCount(0);
+
+    await page.keyboard.press("ArrowRight");
+    await expect(page.locator(".notation .mv.current")).toContainText("Rf8+");
+    await expect(page.locator('.sq[data-square="f8"] .piece')).toHaveAttribute("alt", "R");
+    await page.keyboard.press("ArrowLeft");
+    await expect(page.locator(".notation .mv.current")).toHaveCount(0);
+    await expect(page.locator('.sq[data-square="f7"] .piece')).toHaveAttribute("alt", "R");
   } finally {
     rmSync(directory, { force: true, recursive: true });
   }

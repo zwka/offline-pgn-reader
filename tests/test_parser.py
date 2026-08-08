@@ -91,6 +91,26 @@ def test_variation_tree_structure():
     assert d5.san == "d5"
     # mainline unaffected by variations
     assert [n.san for n in mainline(doc)] == ["e4", "e5", "Nf3", "Nc6", "Bb5"]
+    assert [(n.id, n.parent_id, n.san, n.children) for n in nodes] == [
+        (0, None, None, [1]),
+        (1, 0, "e4", [2, 9, 17]),
+        (2, 1, "e5", [3]),
+        (3, 2, "Nf3", [4, 6]),
+        (4, 3, "Nc6", [5]),
+        (5, 4, "Bb5", []),
+        (6, 3, "Nf6", [7]),
+        (7, 6, "Nxe5", [8]),
+        (8, 7, "d6", []),
+        (9, 1, "c5", [10, 12]),
+        (10, 9, "Nf3", [11]),
+        (11, 10, "d6", []),
+        (12, 9, "c3", [13, 14]),
+        (13, 12, "Nf6", []),
+        (14, 12, "d5", [15]),
+        (15, 14, "exd5", [16]),
+        (16, 15, "Qxd5", []),
+        (17, 1, "e6", []),
+    ]
 
 
 def test_fen_setup_start_position():

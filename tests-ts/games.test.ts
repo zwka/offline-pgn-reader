@@ -1,5 +1,5 @@
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 
 import Database from "better-sqlite3";
@@ -266,6 +266,54 @@ describe("indexed Game list contract", () => {
       "Nc6",
       "Bc4",
     ]);
+  });
+
+  it("opens recursive variations and FEN-start documents through the API", async () => {
+    const { directory, server } = testServer();
+    servers.push(server);
+    const sourcePath = join(directory, "variation-fen.pgn");
+    const variations = readFileSync(resolve("tests/fixtures/variations.pgn"), "utf8").trim();
+    const fenStart = readFileSync(resolve("tests/fixtures/fen_start.pgn"), "utf8").trim();
+    writeFileSync(sourcePath, `${variations}\n\n${fenStart}\n`, "utf8");
+
+    const registered = await server.inject({
+      method: "POST",
+      url: "/api/files",
+      payload: { path: sourcePath },
+    });
+    const file = await waitForReady(server, registered.json().id);
+    expect(file).toMatchObject({ scan_status: "ready", game_count: 2, warning_count: 0 });
+
+    const games = (await server.inject({
+      method: "GET",
+      url: `/api/files/${file.id}/games`,
+    })).json().games;
+    const variationResponse = await server.inject({
+      method: "GET",
+      url: `/api/games/${games[0].id}`,
+    });
+    const variationDocument = variationResponse.json();
+    expect(variationResponse.statusCode).toBe(200);
+    expect(Value.Check(GameDocumentSchema, variationDocument)).toBe(true);
+    expect(variationDocument.nodes[1].children).toEqual([2, 9, 17]);
+    expect(variationDocument.nodes[12].children).toEqual([13, 14]);
+    expect(variationDocument.nodes[17]).toMatchObject({
+      parentId: 1,
+      san: "e6",
+      uci: "e7e6",
+    });
+
+    const fenResponse = await server.inject({
+      method: "GET",
+      url: `/api/games/${games[1].id}`,
+    });
+    const fenDocument = fenResponse.json();
+    expect(fenResponse.statusCode).toBe(200);
+    expect(Value.Check(GameDocumentSchema, fenDocument)).toBe(true);
+    expect(fenDocument.nodes[0].fen).toBe(
+      "1k6/1P3R2/8/8/8/8/r7/2K5 w - - 0 1",
+    );
+    expect(fenDocument.nodes[1]).toMatchObject({ san: "Rf8+", uci: "f7f8", parentId: 0 });
   });
 
   it("rejects invalid list bounds instead of silently changing the request", async () => {

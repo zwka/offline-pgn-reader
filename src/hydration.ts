@@ -1,4 +1,5 @@
 import { Chess } from "chess.js";
+import { parse } from "chess.js/src/pgn.js";
 
 import type { TagPair } from "./scanner.js";
 import type { GameDocumentPayload, GameNode } from "./wire.js";
@@ -13,13 +14,24 @@ export class HydrationError extends Error {
   }
 }
 
+type ParsedNode = {
+  move?: string;
+  variations: ParsedNode[];
+};
+
+type ParsedGame = {
+  root: ParsedNode;
+};
+
 /**
- * Hydrate the root and main continuation of one indexed PGN span.
+ * Hydrate one indexed PGN span into the flat document tree used on the wire.
  *
- * The document deliberately stays flat on the wire. Variations and
- * annotations are parsed by later tickets; comments and side-lines are
- * skipped here so a normal main line remains readable without losing its
- * source span.
+ * chess.js parses a RAV as a no-move wrapper whose first child is the
+ * alternate continuation. Those wrappers are deliberately not represented in
+ * the document: their children become siblings of the preceding move, with
+ * the first child remaining the main continuation. The conversion uses one
+ * mutable board and an explicit DFS stack so every node gets its position in
+ * preorder without replaying a line from the root.
  */
 export function hydrateGame(
   sourceBytes: Uint8Array,
@@ -31,51 +43,29 @@ export function hydrateGame(
   if (!source.trim()) throw new HydrationError("no PGN game found in source span");
 
   const warnings: string[] = [];
-  const board = new Chess();
+  const board = startingBoard(headers, warnings);
   const nodes: GameNode[] = [rootNode(board)];
-  const tokens = tokenizeMainLine(removeHeaderLines(parseSource), warnings);
-
-  for (const rawToken of tokens) {
-    const token = normalizeMoveToken(rawToken);
-    if (!token || isMoveNumber(token)) continue;
-    if (RESULT_TOKENS.has(token)) break;
-    if (token.startsWith("$")) continue;
-
-    const parentId = nodes.length - 1;
-    const color = board.turn();
-    const moveNumber = board.moveNumber();
-    let move;
-    try {
-      move = board.move(token, { strict: false });
-    } catch (error) {
-      warnings.push(
-        `could not parse move ${rawToken}: ${error instanceof Error ? error.message : String(error)}`,
-      );
-      continue;
-    }
-
-    const id = nodes.length;
-    const node: GameNode = {
-      id,
-      parentId,
-      san: move.san,
-      uci: `${move.from}${move.to}${move.promotion ?? ""}`,
-      ply: positionPly(board),
-      moveNumber,
-      color,
-      fen: board.fen(),
-      nags: [],
-      glyphs: [],
-      comment: "",
-      startingComment: "",
-      children: [],
-      arrows: [],
-      highlights: [],
-    };
-    nodes[parentId].children.push(id);
-    nodes.push(node);
+  let parsed: ParsedGame;
+  try {
+    parsed = parse(removeEscapeLines(parseSource)) as ParsedGame;
+  } catch (error) {
+    warnings.push(
+      `could not parse PGN tree: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    hydrateMainLine(board, nodes, removeHeaderLines(parseSource), warnings);
+    return documentPayload(headers, nodes, warnings, source);
   }
 
+  hydrateTree(board, nodes, parsed.root, warnings);
+  return documentPayload(headers, nodes, warnings, source);
+}
+
+function documentPayload(
+  headers: TagPair[],
+  nodes: GameNode[],
+  warnings: string[],
+  source: string,
+): GameDocumentPayload {
   return {
     headers,
     rootId: 0,
@@ -84,6 +74,123 @@ export function hydrateGame(
     warnings,
     source,
   };
+}
+
+function startingBoard(headers: TagPair[], warnings: string[]): Chess {
+  const setup = headerValue(headers, "SetUp");
+  const fen = headerValue(headers, "FEN");
+  if (setup === "1" && fen) {
+    try {
+      return new Chess(fen);
+    } catch (error) {
+      warnings.push(
+        `invalid FEN header, using standard start: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+  return new Chess();
+}
+
+type TraversalFrame = {
+  parsed: ParsedNode;
+  documentId: number;
+  nextChild: number;
+  undoOnExit: boolean;
+};
+
+function hydrateTree(
+  board: Chess,
+  nodes: GameNode[],
+  parsedRoot: ParsedNode,
+  warnings: string[],
+): void {
+  const stack: TraversalFrame[] = [
+    { parsed: parsedRoot, documentId: 0, nextChild: 0, undoOnExit: false },
+  ];
+
+  while (stack.length) {
+    const frame = stack.at(-1)!;
+    if (frame.nextChild >= frame.parsed.variations.length) {
+      stack.pop();
+      if (frame.undoOnExit) board.undo();
+      continue;
+    }
+
+    const child = frame.parsed.variations[frame.nextChild++];
+    if (!child.move) {
+      // A RAV root has no move of its own. Its children are continuations
+      // from the current position and must remain siblings of the main line.
+      stack.push({
+        parsed: child,
+        documentId: frame.documentId,
+        nextChild: 0,
+        undoOnExit: false,
+      });
+      continue;
+    }
+
+    const node = appendMove(board, nodes, frame.documentId, child.move, warnings);
+    if (!node) continue;
+    stack.push({ parsed: child, documentId: node.id, nextChild: 0, undoOnExit: true });
+  }
+}
+
+function appendMove(
+  board: Chess,
+  nodes: GameNode[],
+  parentId: number,
+  token: string,
+  warnings: string[],
+): GameNode | null {
+  const color = board.turn();
+  const moveNumber = board.moveNumber();
+  let move;
+  try {
+    move = board.move(token, { strict: false });
+  } catch (error) {
+    warnings.push(
+      `could not parse move ${token}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    return null;
+  }
+
+  const id = nodes.length;
+  const node: GameNode = {
+    id,
+    parentId,
+    san: move.san,
+    uci: `${move.from}${move.to}${move.promotion ?? ""}`,
+    ply: positionPly(board),
+    moveNumber,
+    color,
+    fen: board.fen(),
+    nags: [],
+    glyphs: [],
+    comment: "",
+    startingComment: "",
+    children: [],
+    arrows: [],
+    highlights: [],
+  };
+  nodes[parentId].children.push(id);
+  nodes.push(node);
+  return node;
+}
+
+function hydrateMainLine(
+  board: Chess,
+  nodes: GameNode[],
+  source: string,
+  warnings: string[],
+): void {
+  const tokens = tokenizeMainLine(source, warnings);
+  for (const rawToken of tokens) {
+    const token = normalizeMoveToken(rawToken);
+    if (!token || isMoveNumber(token)) continue;
+    if (RESULT_TOKENS.has(token)) break;
+    if (token.startsWith("$")) continue;
+    appendMove(board, nodes, nodes.length - 1, token, warnings);
+  }
 }
 
 function rootNode(board: Chess): GameNode {
@@ -135,6 +242,38 @@ function unescapeTagValue(value: string): string {
 
 function removeHeaderLines(source: string): string {
   return source.replace(HEADER_LINE_RE, "");
+}
+
+function removeEscapeLines(source: string): string {
+  let result = "";
+  let lineStart = true;
+  let inComment = false;
+
+  for (let index = 0; index < source.length; index += 1) {
+    const character = source[index];
+    if (lineStart && !inComment) {
+      let marker = index;
+      while (source[marker] === " " || source[marker] === "\t") marker += 1;
+      if (source[marker] === "%") {
+        const newline = source.indexOf("\n", marker);
+        if (newline === -1) break;
+        result += "\n";
+        index = newline;
+        lineStart = true;
+        continue;
+      }
+    }
+
+    result += character;
+    if (character === "\n") {
+      lineStart = true;
+    } else if (character !== "\r") {
+      lineStart = false;
+    }
+    if (!inComment && character === "{") inComment = true;
+    else if (inComment && character === "}") inComment = false;
+  }
+  return result;
 }
 
 function tokenizeMainLine(source: string, warnings: string[]): string[] {
