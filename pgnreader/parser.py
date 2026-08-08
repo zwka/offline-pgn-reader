@@ -16,9 +16,19 @@ from __future__ import annotations
 import io
 import logging
 import re
+import warnings as warning_module
 
-import chess
-import chess.pgn
+# python-chess 1.11.2 still imports this compatibility alias, which Python
+# 3.14 deprecates even though the parser does not use the engine module.
+with warning_module.catch_warnings():
+    warning_module.filterwarnings(
+        "ignore",
+        message=r"'asyncio\.DefaultEventLoopPolicy' is deprecated and slated for removal in Python 3\.16",
+        category=DeprecationWarning,
+        module=r"chess\.engine",
+    )
+    import chess
+    import chess.pgn
 
 from .models import GameDocument, MoveNode
 from .scanner import TAG_RE
