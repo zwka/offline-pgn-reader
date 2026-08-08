@@ -15,6 +15,7 @@ import { basename, extname, isAbsolute, join, resolve } from "node:path";
 import { homedir } from "node:os";
 
 import { LibraryDatabase } from "./database.js";
+import { indexFile } from "./indexer.js";
 import { fingerprintFile, readGameBytes as readGameSpan, type TagPair } from "./scanner.js";
 import { hydrateGame, HydrationError } from "./hydration.js";
 import type {
@@ -126,7 +127,7 @@ export class LibraryService {
     });
   }
 
-  registerFile(rawPath: string): FileRecord {
+  registerFile(rawPath: string, scan = true): FileRecord {
     const sourcePath = canonicalSourcePath(rawPath);
     const source = this.database.withConnection((database) => {
       database
@@ -136,7 +137,7 @@ export class LibraryService {
         .prepare("SELECT * FROM files WHERE path=?")
         .get(sourcePath) as FileRow;
     });
-    this.startScan(source.id);
+    if (scan) this.startScan(source.id);
     return this.getFile(source.id);
   }
 
@@ -279,6 +280,69 @@ export class LibraryService {
         .get(row.file_id, row.idx_in_file) as { id: number } | undefined;
       return { prev: prev?.id ?? null, next: next?.id ?? null };
     });
+  }
+
+  async scanFileSync(fileId: number, force = false): Promise<FileRecord> {
+    const file = this.getFile(fileId);
+    const activeScan = this.activeScans.get(fileId);
+    if (activeScan && file.scan_status !== "ready") {
+      throw new ServiceError("scan already in progress", 409);
+    }
+    if (file.scan_status === "scanning") {
+      throw new ServiceError("scan already in progress", 409);
+    }
+
+    if (!force && file.scan_status === "ready") {
+      try {
+        if (fingerprintFile(file.path) === file.fingerprint) return file;
+      } catch {
+        throw new ServiceError(`source file missing: ${file.path}`, 409);
+      }
+    }
+
+    if (activeScan) {
+      activeScan.finished = true;
+      this.activeScans.delete(fileId);
+      this.progress.delete(fileId);
+    }
+
+    let bytesTotal: number;
+    try {
+      bytesTotal = statSync(file.path).size;
+    } catch {
+      throw new ServiceError(`source file missing: ${file.path}`, 409);
+    }
+
+    const claimed = this.database.withConnection((database) => {
+      const result = database
+        .prepare(
+          "UPDATE files SET scan_status='scanning', scan_error=NULL " +
+            "WHERE id=? AND scan_status!='scanning'",
+        )
+        .run(fileId);
+      return result.changes === 1;
+    });
+    if (!claimed) throw new ServiceError("scan already in progress", 409);
+
+    const progress: ScanProgressState = { bytesDone: 0, bytesTotal, gamesFound: 0 };
+    this.progress.set(fileId, progress);
+    try {
+      await indexFile({
+        dbPath: this.database.path,
+        fileId,
+        sourcePath: file.path,
+        onProgress: (bytesDone, total, gamesFound) => {
+          progress.bytesDone = bytesDone;
+          progress.bytesTotal = total;
+          progress.gamesFound = gamesFound;
+        },
+      });
+    } catch (error) {
+      this.setScanError(fileId, error);
+    } finally {
+      this.progress.delete(fileId);
+    }
+    return this.getFile(fileId);
   }
 
   startScan(fileId: number, force = false): boolean {
