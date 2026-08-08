@@ -15,6 +15,14 @@ function isViewCurrent(viewId) {
   return viewId === viewGeneration;
 }
 
+function lastTagValue(tags, name) {
+  let value = "";
+  for (const [key, candidate] of tags) {
+    if (key === name) value = candidate;
+  }
+  return value;
+}
+
 // ------------------------------------------------------------------ utils
 
 function h(tag, attrs = {}, ...children) {
@@ -502,14 +510,15 @@ async function gameView(gameId, viewId) {
   app.appendChild(h("div", { class: "loading" }, h("span", { class: "spinner" }), "Loading game…"));
 
   let doc;
+  let tags;
   try {
-    doc = await api.game(gameId);
+    [doc, tags] = await Promise.all([api.game(gameId), api.gameTags(gameId)]);
   } catch (err) { return showError(err, viewId); }
   if (!isViewCurrent(viewId)) return;
 
   const nodes = doc.nodes;
-  const headers = Object.fromEntries(doc.headers);
-  const title = [headers.White, headers.Black].filter((s) => s && s !== "?").join(" — ") || "Untitled game";
+  const title = [lastTagValue(tags, "White"), lastTagValue(tags, "Black")]
+    .filter((s) => s && s !== "?").join(" — ") || "Untitled game";
 
   setBreadcrumb(
     h("a", { href: "#/library" }, "Library"),
@@ -573,9 +582,9 @@ async function gameView(gameId, viewId) {
             caption
           ),
           h("details", { class: "meta-panel" },
-            h("summary", {}, "Game headers"),
+            h("summary", {}, "Game tags"),
             h("table", { class: "meta-table" },
-              doc.headers.map(([k, v]) => h("tr", {}, h("td", {}, k), h("td", {}, v))))
+              tags.map(([k, v]) => h("tr", {}, h("td", {}, k), h("td", {}, v))))
           ),
           doc.warnings.length
             ? h("div", { class: "warn-panel" }, "Parser warnings:",
@@ -648,8 +657,12 @@ async function gameView(gameId, viewId) {
   let pgnLoaded = false;
   async function togglePgn() {
     if (!pgnLoaded) {
-      pgnPre.textContent = await api.gamePgn(gameId);
-      pgnLoaded = true;
+      try {
+        pgnPre.textContent = await api.gamePgn(gameId);
+        pgnLoaded = true;
+      } catch (err) {
+        pgnPre.textContent = `Could not load source: ${err.message || err}`;
+      }
     }
     pgnPre.classList.toggle("hidden");
   }

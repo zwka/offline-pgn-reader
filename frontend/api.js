@@ -35,4 +35,5 @@ export const api = {
     request(`/api/files/${fileId}/games?q=${encodeURIComponent(q)}&offset=${offset}&limit=${limit}`),
   game: (id) => request(`/api/games/${id}`),
   gamePgn: (id) => request(`/api/games/${id}/pgn`),
+  gameTags: (id) => request(`/api/games/${id}/tags`),
 };

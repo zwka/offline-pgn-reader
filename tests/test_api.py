@@ -114,8 +114,31 @@ def test_raw_pgn_endpoint_round_trip(client, fixture_copy):
     games = client.get(f"/api/files/{f['id']}/games").json()["games"]
     r = client.get(f"/api/games/{games[1]['id']}/pgn")
     assert r.status_code == 200
+    assert r.headers["content-type"].startswith("text/plain; charset=utf-8")
     assert r.text.startswith('[Event "Test Open"]')
     assert r.text in p.read_text(encoding="utf-8")
+
+
+def test_tags_endpoint_preserves_duplicate_pairs_and_source_order(client, tmp_path):
+    source = tmp_path / "duplicate-tags.pgn"
+    source.write_text(
+        '[Event "First"]\n[Event "Second"]\n[White "First White"]\n'
+        '[White "Second White"]\n[Result "*"]\n\n1. e4 *\n',
+        encoding="utf-8",
+    )
+    file_info = register(client, source)
+    game_id = client.get(f"/api/files/{file_info['id']}/games").json()["games"][0]["id"]
+
+    response = client.get(f"/api/games/{game_id}/tags")
+
+    assert response.status_code == 200
+    assert response.json() == [
+        ["Event", "First"],
+        ["Event", "Second"],
+        ["White", "First White"],
+        ["White", "Second White"],
+        ["Result", "*"],
+    ]
 
 
 def test_search_query(client, fixture_copy):

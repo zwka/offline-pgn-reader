@@ -239,6 +239,16 @@ export class LibraryService {
     };
   }
 
+  getGameSource(gameId: number): string {
+    const row = this.gameRowById(gameId);
+    return this.readGameBytes(row).toString("utf8");
+  }
+
+  getGameTags(gameId: number): TagPair[] {
+    const row = this.gameRowById(gameId);
+    return storedHeaders(row.tag_json) ?? [];
+  }
+
   neighborGameIds(gameId: number): { prev: number | null; next: number | null } {
     const row = this.gameRowById(gameId);
     return this.database.withConnection((database) => {

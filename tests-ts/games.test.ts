@@ -7,7 +7,7 @@ import { Value } from "@sinclair/typebox/value";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { buildServer } from "../src/server.js";
-import { GameDocumentSchema, GamePageSchema } from "../src/wire.js";
+import { GameDocumentSchema, GamePageSchema, TagPairsSchema } from "../src/wire.js";
 
 const servers = [] as ReturnType<typeof buildServer>[];
 const testDirectories: string[] = [];
@@ -314,6 +314,66 @@ describe("indexed Game list contract", () => {
       "1k6/1P3R2/8/8/8/8/r7/2K5 w - - 0 1",
     );
     expect(fenDocument.nodes[1]).toMatchObject({ san: "Rf8+", uci: "f7f8", parentId: 0 });
+  });
+
+  it("serves decoded source text and ordered duplicate tag pairs", async () => {
+    const { directory, server } = testServer();
+    servers.push(server);
+    const source = [
+      '[Event "First event"]',
+      '[Event "Second event"]',
+      '[White "First white"]',
+      '[White "Second white"]',
+      '[Note "deja vu"]',
+      '[Result "*"]',
+      "",
+      "1. e4 *",
+      "",
+    ].join("\n");
+    const sourcePath = join(directory, "source-and-tags.pgn");
+    writeFileSync(sourcePath, source, "utf8");
+
+    const registered = await server.inject({
+      method: "POST",
+      url: "/api/files",
+      payload: { path: sourcePath },
+    });
+    const file = await waitForReady(server, registered.json().id);
+    const game = (await server.inject({
+      method: "GET",
+      url: `/api/files/${file.id}/games`,
+    })).json().games[0];
+
+    const sourceResponse = await server.inject({
+      method: "GET",
+      url: `/api/games/${game.id}/pgn`,
+    });
+    expect(sourceResponse.statusCode).toBe(200);
+    expect(sourceResponse.headers["content-type"]).toMatch(/^text\/plain; charset=utf-8/);
+    expect(sourceResponse.body).toBe(source.trimEnd());
+
+    const tagsResponse = await server.inject({
+      method: "GET",
+      url: `/api/games/${game.id}/tags`,
+    });
+    const tags = tagsResponse.json();
+    expect(tagsResponse.statusCode).toBe(200);
+    expect(Value.Check(TagPairsSchema, tags)).toBe(true);
+    expect(tags).toEqual([
+      ["Event", "First event"],
+      ["Event", "Second event"],
+      ["White", "First white"],
+      ["White", "Second white"],
+      ["Note", "deja vu"],
+      ["Result", "*"],
+    ]);
+
+    const document = (await server.inject({
+      method: "GET",
+      url: `/api/games/${game.id}`,
+    })).json();
+    expect(Value.Check(GameDocumentSchema, document)).toBe(true);
+    expect(document.headers).toEqual(tags);
   });
 
   it("serves comments, NAGs, and graphics through the typed GameDocument wire", async () => {

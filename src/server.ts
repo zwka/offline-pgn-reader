@@ -15,6 +15,7 @@ import {
   GamePageSchema,
   HealthResponseSchema,
   RegisterFileRequestSchema,
+  TagPairsSchema,
   type ErrorResponse,
   type RegisterFileRequest,
 } from "./wire.js";
@@ -179,6 +180,30 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
       ...library.getGameDocument(Number(request.params.gameId)),
       neighbors: library.neighborGameIds(Number(request.params.gameId)),
     }),
+  );
+
+  app.get<{ Params: { gameId: string } }>(
+    "/api/games/:gameId/pgn",
+    {
+      schema: {
+        params: Type.Object({ gameId: Type.String({ pattern: "^[1-9][0-9]*$" }) }),
+      },
+    },
+    async (request, reply) =>
+      reply
+        .type("text/plain; charset=utf-8")
+        .send(library.getGameSource(Number(request.params.gameId))),
+  );
+
+  app.get<{ Params: { gameId: string } }>(
+    "/api/games/:gameId/tags",
+    {
+      schema: {
+        params: Type.Object({ gameId: Type.String({ pattern: "^[1-9][0-9]*$" }) }),
+        response: { 200: TagPairsSchema },
+      },
+    },
+    async (request) => library.getGameTags(Number(request.params.gameId)),
   );
 
   app.setNotFoundHandler(async (_request, reply) =>

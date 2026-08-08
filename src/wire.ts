@@ -90,6 +90,12 @@ export const GamePageSchema = Type.Object(
 
 export type GamePage = Static<typeof GamePageSchema>;
 
+export const TagPairSchema = Type.Tuple([Type.String(), Type.String()]);
+export const TagPairsSchema = Type.Array(TagPairSchema);
+
+export type TagPair = Static<typeof TagPairSchema>;
+export type TagPairs = Static<typeof TagPairsSchema>;
+
 export const GameNodeSchema = Type.Object(
   {
     id: Type.Integer({ minimum: 0 }),
@@ -136,7 +142,7 @@ export const GameDocumentSchema = Type.Object(
     fileId: Type.Integer({ minimum: 1 }),
     fileName: Type.String(),
     idxInFile: Type.Integer({ minimum: 0 }),
-    headers: Type.Array(Type.Tuple([Type.String(), Type.String()])),
+    headers: TagPairsSchema,
     rootId: Type.Integer({ minimum: 0 }),
     nodes: Type.Array(GameNodeSchema),
     result: Type.String(),

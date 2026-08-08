@@ -173,6 +173,60 @@ test("opens a normal Game record and selects moves across the board and notation
   }
 });
 
+test("opens decoded source text and ordered duplicate tags from the reader", async ({ page }) => {
+  const directory = mkdtempSync(join(tmpdir(), "offline-pgn-reader-browser-source-tags-"));
+  const source = join(directory, "source-and-tags.pgn");
+  const content = [
+    '[Event "First event"]',
+    '[Event "Second event"]',
+    '[White "First white"]',
+    '[White "Second white"]',
+    '[Note "deja vu"]',
+    '[Result "*"]',
+    "",
+    "1. e4 *",
+    "",
+  ].join("\n");
+  writeFileSync(source, content);
+
+  try {
+    await page.goto("/");
+    await page.locator("#path-input").fill(source);
+    await page.getByRole("button", { name: "Index path" }).click();
+    const card = page.locator(".file-card").filter({ hasText: "source-and-tags.pgn" });
+    await expect(card).toContainText("1 games", { timeout: 10_000 });
+
+    await card.click();
+    await expect(page.locator(".games-table tbody tr")).toHaveCount(1, { timeout: 10_000 });
+    const tagsResponse = page.waitForResponse((response) =>
+      /\/api\/games\/\d+\/tags$/.test(response.url()) && response.request().method() === "GET",
+    );
+    await page.locator(".games-table tbody tr").dispatchEvent("click");
+    await tagsResponse;
+
+    await expect(page.locator(".reader-title")).toContainText("Second white");
+    await page.getByRole("button", { name: /Raw PGN source/ }).click();
+    await expect(page.locator(".pgn-drawer pre")).toBeVisible();
+    await expect(page.locator(".pgn-drawer pre")).toHaveText(content.trimEnd());
+
+    await page.locator(".meta-panel summary").click();
+    const rows = page.locator(".meta-table tr");
+    await expect(rows).toHaveCount(6);
+    expect(await rows.evaluateAll((elements) => elements.map((row) =>
+      Array.from(row.querySelectorAll("td"), (cell) => cell.textContent),
+    ))).toEqual([
+      ["Event", "First event"],
+      ["Event", "Second event"],
+      ["White", "First white"],
+      ["White", "Second white"],
+      ["Note", "deja vu"],
+      ["Result", "*"],
+    ]);
+  } finally {
+    rmSync(directory, { force: true, recursive: true });
+  }
+});
+
 test("renders the annotation corpus on notation, warnings, and board graphics", async ({ page }) => {
   const directory = mkdtempSync(join(tmpdir(), "offline-pgn-reader-browser-annotations-"));
   const source = join(directory, "annotations.pgn");
