@@ -5,7 +5,8 @@ import { Value } from "@sinclair/typebox/value";
 import Fastify, { type FastifyInstance } from "fastify";
 
 import { config as defaultConfig, type AppConfig } from "./config.js";
-import { createSqliteProbe, LibraryDatabase } from "./database.js";
+import { createSqliteProbe } from "./database.js";
+import { SqliteIndex } from "./index.js";
 import { LibraryService, ServiceError } from "./library.js";
 import {
   DiscoveredSourceSchema,
@@ -32,9 +33,9 @@ function errorResponse(detail: string): ErrorResponse {
 export function buildServer(options: ServerOptions = {}): FastifyInstance {
   const { databaseProbe, ...configOverrides } = options;
   const appConfig: AppConfig = { ...defaultConfig, ...configOverrides };
-  const database = new LibraryDatabase(appConfig.dbPath);
+  const index = new SqliteIndex(appConfig.dbPath);
   const library = new LibraryService(
-    database,
+    index,
     appConfig.watchDirs,
     appConfig.uploadDir,
     appConfig.maxGameBytes,

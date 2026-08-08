@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import type { FastifyInstance } from "fastify";
 
 import { config as defaultConfig, type AppConfig } from "./config.js";
-import { LibraryDatabase } from "./database.js";
+import { SqliteIndex } from "./index.js";
 import { LibraryService } from "./library.js";
 import { buildServer } from "./server.js";
 
@@ -154,7 +154,7 @@ async function runIndex(
   let service: LibraryService | undefined;
   try {
     service = new LibraryService(
-      new LibraryDatabase(appConfig.dbPath),
+      new SqliteIndex(appConfig.dbPath),
       appConfig.watchDirs,
       appConfig.uploadDir,
       appConfig.maxGameBytes,
@@ -187,7 +187,7 @@ async function runReset(
   let service: LibraryService | undefined;
   try {
     service = new LibraryService(
-      new LibraryDatabase(appConfig.dbPath),
+      new SqliteIndex(appConfig.dbPath),
       appConfig.watchDirs,
       appConfig.uploadDir,
       appConfig.maxGameBytes,

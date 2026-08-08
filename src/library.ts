@@ -14,8 +14,7 @@ import { Worker } from "node:worker_threads";
 import { basename, extname, isAbsolute, join, resolve } from "node:path";
 import { homedir } from "node:os";
 
-import { LibraryDatabase } from "./database.js";
-import { indexFile } from "./indexer.js";
+import { IndexBusyError, type Index, type IndexFile, type IndexGame } from "./index.js";
 import { fingerprintFile, readGameBytes as readGameSpan, type TagPair } from "./scanner.js";
 import { hydrateGame, HydrationError } from "./hydration.js";
 import type {
@@ -28,47 +27,8 @@ import type {
 
 const DEFAULT_MAX_GAME_BYTES = 8 * 1024 * 1024;
 
-type FileRow = {
-  id: number;
-  path: string;
-  name: string;
-  size: number;
-  mtime_ns: number;
-  fingerprint: string;
-  game_count: number;
-  warning_count: number;
-  scan_status: "pending" | "scanning" | "ready" | "error";
-  scan_error: string | null;
-  scanned_at: string | null;
-};
-
-type GameRecordRow = {
-  id: number;
-  idx_in_file: number;
-  event: string;
-  site: string;
-  date: string;
-  round: string;
-  white: string;
-  black: string;
-  result: string;
-  eco: string;
-  opening: string;
-  has_fen: number;
-  warning: string | null;
-  byte_size: number;
-};
-
-type GameDocumentRow = GameRecordRow & {
-  file_id: number;
-  offset_start: number;
-  offset_end: number;
-  tag_json: string;
-  file_path: string;
-  file_name: string;
-  file_scan_status: "pending" | "scanning" | "ready" | "error";
-  file_fingerprint: string;
-};
+type FileRow = IndexFile;
+type GameDocumentRow = IndexGame;
 
 type ScanProgressState = {
   bytesDone: number;
@@ -109,35 +69,17 @@ export class LibraryService {
   private readonly activeScans = new Map<number, ActiveScan>();
 
   constructor(
-    private readonly database: LibraryDatabase,
+    private readonly index: Index,
     private readonly watchDirs: string[],
     private readonly uploadDir: string,
     private readonly maxGameBytes = DEFAULT_MAX_GAME_BYTES,
   ) {
-    this.database.initialize();
-    this.recoverInterruptedScans();
-  }
-
-  private recoverInterruptedScans(): void {
-    this.database.withConnection((database) => {
-      database
-        .prepare(
-          "UPDATE files SET scan_status='pending', scan_error=NULL WHERE scan_status='scanning'",
-        )
-        .run();
-    });
+    this.index.recoverInterruptedScans();
   }
 
   registerFile(rawPath: string, scan = true): FileRecord {
     const sourcePath = canonicalSourcePath(rawPath);
-    const source = this.database.withConnection((database) => {
-      database
-        .prepare("INSERT OR IGNORE INTO files(path, name) VALUES (?, ?)")
-        .run(sourcePath, basename(sourcePath));
-      return database
-        .prepare("SELECT * FROM files WHERE path=?")
-        .get(sourcePath) as FileRow;
-    });
+    const source = this.index.registerFile(sourcePath, basename(sourcePath));
     if (scan) this.startScan(source.id);
     return this.getFile(source.id);
   }
@@ -164,74 +106,38 @@ export class LibraryService {
   }
 
   listFiles(): FileRecord[] {
-    const sources = this.database.withConnection((database) =>
-      database
-        .prepare("SELECT * FROM files ORDER BY name")
-        .all() as FileRow[],
-    );
-    return sources.map((source) => this.toFileRecord(source));
+    return this.index.listFiles().map((source) => this.toFileRecord(source));
   }
 
   removeFile(fileId: number): void {
     this.getFile(fileId);
-    this.withoutActiveScan(fileId);
-    const deleted = this.database.withConnection((database) =>
-      database.prepare("DELETE FROM files WHERE id=?").run(fileId),
-    );
-    if (deleted.changes === 0) throw new NotFound(`file ${fileId} not found`);
+    let deleted: boolean;
+    try {
+      deleted = this.index.deleteFile(fileId);
+    } catch (error) {
+      throw indexError(error);
+    }
+    if (!deleted) throw new NotFound(`file ${fileId} not found`);
   }
 
   resetIndex(): void {
-    this.withoutActiveScan();
-    this.database.reset();
+    try {
+      this.index.reset();
+    } catch (error) {
+      throw indexError(error);
+    }
     this.progress.clear();
   }
 
   getFile(fileId: number): FileRecord {
-    const source = this.database.withConnection((database) =>
-      database
-        .prepare("SELECT * FROM files WHERE id=?")
-        .get(fileId) as FileRow | undefined,
-    );
+    const source = this.index.getFile(fileId);
     if (!source) throw new NotFound(`file ${fileId} not found`);
     return this.toFileRecord(source);
   }
 
   listGames(fileId: number, query = "", offset = 0, limit = 100): GamePage {
     this.getFile(fileId);
-    const normalizedOffset = Math.max(0, offset);
-    const normalizedLimit = Math.max(1, Math.min(limit, 500));
-    const search = query.trim();
-    const where = ["file_id=?"];
-    const params: Array<string | number> = [fileId];
-    if (search) {
-      const like = `%${search}%`;
-      where.push(
-        "(white LIKE ? OR black LIKE ? OR event LIKE ? OR site LIKE ? OR opening LIKE ? OR eco LIKE ? OR date LIKE ?)",
-      );
-      params.push(like, like, like, like, like, like, like);
-    }
-    const whereSql = where.join(" AND ");
-    return this.database.withConnection((database) => {
-      const total = (database
-        .prepare(`SELECT COUNT(*) AS count FROM games WHERE ${whereSql}`)
-        .get(...params) as { count: number }).count;
-      const games = database
-        .prepare(
-          `SELECT id, idx_in_file, event, site, date, round, white, black,
-             result, eco, opening, has_fen, warning,
-             offset_end - offset_start AS byte_size
-           FROM games WHERE ${whereSql}
-           ORDER BY idx_in_file LIMIT ? OFFSET ?`,
-        )
-        .all(...params, normalizedLimit, normalizedOffset) as GameRecordRow[];
-      return {
-        total,
-        offset: normalizedOffset,
-        limit: normalizedLimit,
-        games,
-      };
-    });
+    return this.index.listGames(fileId, query, offset, limit);
   }
 
   getGameDocument(gameId: number): Omit<GameDocument, "neighbors"> {
@@ -240,7 +146,7 @@ export class LibraryService {
     let hydrated: GameDocumentPayload;
     try {
       const extraWarnings = row.warning ? [`index warning: ${row.warning}`] : [];
-      hydrated = hydrateGame(source, storedHeaders(row.tag_json), extraWarnings);
+      hydrated = hydrateGame(source, this.index.getGameTags(gameId) ?? [], extraWarnings);
     } catch (error) {
       if (error instanceof HydrationError) {
         throw new ServiceError(`game could not be parsed: ${error.message}`, 422);
@@ -262,25 +168,14 @@ export class LibraryService {
   }
 
   getGameTags(gameId: number): TagPair[] {
-    const row = this.gameRowById(gameId);
-    return storedHeaders(row.tag_json) ?? [];
+    this.gameRowById(gameId);
+    return this.index.getGameTags(gameId) ?? [];
   }
 
   neighborGameIds(gameId: number): { prev: number | null; next: number | null } {
-    const row = this.gameRowById(gameId);
-    return this.database.withConnection((database) => {
-      const prev = database
-        .prepare(
-          "SELECT id FROM games WHERE file_id=? AND idx_in_file<? ORDER BY idx_in_file DESC LIMIT 1",
-        )
-        .get(row.file_id, row.idx_in_file) as { id: number } | undefined;
-      const next = database
-        .prepare(
-          "SELECT id FROM games WHERE file_id=? AND idx_in_file>? ORDER BY idx_in_file LIMIT 1",
-        )
-        .get(row.file_id, row.idx_in_file) as { id: number } | undefined;
-      return { prev: prev?.id ?? null, next: next?.id ?? null };
-    });
+    const neighbors = this.index.neighborGameIds(gameId);
+    if (!neighbors) throw new NotFound(`game ${gameId} not found`);
+    return neighbors;
   }
 
   async scanFileSync(fileId: number, force = false): Promise<FileRecord> {
@@ -314,30 +209,21 @@ export class LibraryService {
       throw new ServiceError(`source file missing: ${file.path}`, 409);
     }
 
-    const claimed = this.database.withConnection((database) => {
-      const result = database
-        .prepare(
-          "UPDATE files SET scan_status='scanning', scan_error=NULL " +
-            "WHERE id=? AND scan_status!='scanning'",
-        )
-        .run(fileId);
-      return result.changes === 1;
-    });
+    const claimed = this.index.claimScan(fileId);
     if (!claimed) throw new ServiceError("scan already in progress", 409);
 
     const progress: ScanProgressState = { bytesDone: 0, bytesTotal, gamesFound: 0 };
     this.progress.set(fileId, progress);
     try {
-      await indexFile({
-        dbPath: this.database.path,
+      await this.index.replaceGames(
         fileId,
-        sourcePath: file.path,
-        onProgress: (bytesDone, total, gamesFound) => {
+        file.path,
+        (bytesDone, total, gamesFound) => {
           progress.bytesDone = bytesDone;
           progress.bytesTotal = total;
           progress.gamesFound = gamesFound;
         },
-      });
+      );
     } catch (error) {
       this.setScanError(fileId, error);
     } finally {
@@ -377,15 +263,7 @@ export class LibraryService {
     }
 
     const progress: ScanProgressState = { bytesDone: 0, bytesTotal, gamesFound: 0 };
-    const claimed = this.database.withConnection((database) => {
-      const result = database
-        .prepare(
-          "UPDATE files SET scan_status='scanning', scan_error=NULL " +
-            "WHERE id=? AND scan_status!='scanning'",
-        )
-        .run(fileId);
-      return result.changes === 1;
-    });
+    const claimed = this.index.claimScan(fileId);
     if (!claimed) return false;
     this.progress.set(fileId, progress);
 
@@ -393,7 +271,7 @@ export class LibraryService {
     try {
       worker = new Worker(new URL("./scan-worker.ts", import.meta.url), {
         workerData: {
-          dbPath: this.database.path,
+          dbPath: this.index.path,
           fileId,
           sourcePath: file.path,
         },
@@ -441,39 +319,8 @@ export class LibraryService {
     await Promise.allSettled(scans.map((scan) => scan.worker.terminate()));
   }
 
-  private withoutActiveScan(fileId?: number): void {
-    // A worker clears activeScans after its transaction commits `ready`; the
-    // persisted state is the authoritative protection boundary.
-    if (this.databaseHasActiveScan(fileId)) {
-      throw new ServiceError(
-        fileId === undefined
-          ? "cannot reset while a scan is running"
-          : "cannot remove file while a scan is running",
-        409,
-      );
-    }
-  }
-
-  private databaseHasActiveScan(fileId?: number): boolean {
-    return this.database.withConnection((database) => {
-      const row = fileId === undefined
-        ? database
-            .prepare("SELECT 1 AS active FROM files WHERE scan_status='scanning' LIMIT 1")
-            .get() as { active: number } | undefined
-        : database
-            .prepare("SELECT 1 AS active FROM files WHERE id=? AND scan_status='scanning'")
-            .get(fileId) as { active: number } | undefined;
-      return row !== undefined;
-    });
-  }
-
   discover(): DiscoveredSource[] {
-    const registered = this.database.withConnection((database) =>
-      new Set(
-        (database.prepare("SELECT path FROM files").all() as { path: string }[])
-          .map((row) => row.path),
-      ),
-    );
+    const registered = new Set(this.index.sourcePaths());
     const seen = new Set<string>();
     const discovered: DiscoveredSource[] = [];
 
@@ -548,15 +395,7 @@ export class LibraryService {
   }
 
   private gameRowById(gameId: number): GameDocumentRow {
-    const row = this.database.withConnection((database) =>
-      database
-        .prepare(
-          `SELECT g.*, f.path AS file_path, f.name AS file_name,
-             f.scan_status AS file_scan_status, f.fingerprint AS file_fingerprint
-           FROM games g JOIN files f ON f.id = g.file_id WHERE g.id=?`,
-        )
-        .get(gameId) as GameDocumentRow | undefined,
-    );
+    const row = this.index.getGame(gameId);
     if (!row) throw new NotFound(`game ${gameId} not found`);
     return row;
   }
@@ -596,28 +435,14 @@ export class LibraryService {
   }
 
   private setScanError(fileId: number, error: unknown): void {
-    const message = error instanceof Error ? error.message : String(error);
-    this.database.withConnection((database) => {
-      database
-        .prepare("UPDATE files SET scan_status='error', scan_error=? WHERE id=?")
-        .run(message, fileId);
-    });
+    this.index.markScanError(fileId, error);
   }
 }
 
-function storedHeaders(raw: string): TagPair[] | undefined {
-  try {
-    const parsed: unknown = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return undefined;
-    const headers = parsed.filter(
-      (pair): pair is [string, string] =>
-        Array.isArray(pair) && pair.length === 2 &&
-        typeof pair[0] === "string" && typeof pair[1] === "string",
-    );
-    return headers.length === parsed.length ? headers : undefined;
-  } catch {
-    return undefined;
-  }
+function indexError(error: unknown): unknown {
+  return error instanceof IndexBusyError
+    ? new ServiceError(error.message, 409)
+    : error;
 }
 
 function canonicalSourcePath(rawPath: string): string {

@@ -1,6 +1,6 @@
 import { parentPort, workerData } from "node:worker_threads";
 
-import { indexFile } from "./indexer.js";
+import { SqliteIndex } from "./index.js";
 
 type ScanWorkerData = {
   dbPath: string;
@@ -35,14 +35,14 @@ function post(message: ScanWorkerMessage): void {
 async function run(): Promise<void> {
   if (!parentPort) throw new Error("scan worker has no parent port");
 
-  await indexFile({
-    dbPath: scanData.dbPath,
-    fileId: scanData.fileId,
-    sourcePath: scanData.sourcePath,
-    onProgress: (bytesDone, bytesTotal, gamesFound) => {
+  const index = new SqliteIndex(scanData.dbPath);
+  await index.replaceGames(
+    scanData.fileId,
+    scanData.sourcePath,
+    (bytesDone, bytesTotal, gamesFound) => {
       post({ type: "progress", bytesDone, bytesTotal, gamesFound });
     },
-  });
+  );
   post({ type: "complete" });
 }
 

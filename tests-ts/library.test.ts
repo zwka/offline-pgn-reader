@@ -5,7 +5,8 @@ import { tmpdir } from "node:os";
 import Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { SCHEMA_VERSION, LibraryDatabase } from "../src/database.js";
+import { SCHEMA_VERSION } from "../src/database.js";
+import { SqliteIndex } from "../src/index.js";
 import { LibraryService } from "../src/library.js";
 import { buildServer } from "../src/server.js";
 
@@ -148,7 +149,7 @@ describe("Library removal and reset", () => {
     const directory = mkdtempSync(join(tmpdir(), "offline-pgn-reader-ts-library-service-"));
     testDirectories.push(directory);
     const service = new LibraryService(
-      new LibraryDatabase(join(directory, "index.sqlite3")),
+      new SqliteIndex(join(directory, "index.sqlite3")),
       [],
       join(directory, "library"),
     );
