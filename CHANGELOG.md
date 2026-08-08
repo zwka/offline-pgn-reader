@@ -1,6 +1,16 @@
 # Changelog
 
-## 1.1.0 — 2026-07-09
+## 1.1.0 — 2026-08-08
+
+- **TypeScript production cutover**: `npm start` now launches the Fastify /
+  TypeScript server and owns the browser routes and SQLite cache. The Python /
+  FastAPI implementation remains available only for rollback and oracle
+  validation.
+- **Parity and recovery contracts**: cross-runtime fixtures cover scan offsets,
+  SQLite schema, wire casing, source text, ordered duplicate Tag pairs,
+  GameDocument nodes, graphics, and error envelopes. Interrupted scans recover
+  as pending, failed replacement scans preserve the prior index, and CLI
+  commands are `serve`, `index [--force] PATH...`, and `reset`.
 
 - **Graphics annotations**: `[%cal]` arrows and `[%csl]` square highlights
   are extracted per node (including root/pre-game comments and variation
@@ -29,9 +39,9 @@ Initial release.
   to brace comments before parsing (previously silently dropped);
   unrecognized movetext tokens surfaced as parser warnings instead of
   vanishing.
-- FastAPI backend: file registration/upload/discovery, background scans with
-  progress, paged & filtered game lists, hydrated game documents, raw-source
-  round-trip endpoint, health endpoint, index reset.
+- FastAPI backend (the rollback implementation): file registration/upload/discovery,
+  background scans with progress, paged & filtered game lists, hydrated game
+  documents, raw-source round-trip endpoint, health endpoint, index reset.
 - Vanilla-JS frontend: library with scan progress, game table with search,
   Chessable-style reader (board, prose-flow annotations, collapsible
   sidelines, keyboard navigation, raw PGN drawer, header panel).
@@ -39,5 +49,6 @@ Initial release.
 - 55-test pytest suite including regression fixtures over the real sample
   courses (185 + 351 games, exact counts and annotation spot checks).
 
-Benchmarks (M-series laptop): 231 MB / 1M games indexed in ~20 s at ~38 MB
-peak RSS; game hydration by stored offset ~2.5 ms at 1M-game index size.
+Reference benchmarks (pre-cutover Python implementation, M-series laptop):
+231 MB / 1M games indexed in ~20 s at ~38 MB peak RSS; game hydration by
+stored offset ~2.5 ms at 1M-game index size.
