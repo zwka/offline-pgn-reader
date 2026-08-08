@@ -31,6 +31,7 @@ export const api = {
   discover: () => request("/api/discover"),
   rescan: (id) => request(`/api/files/${id}/rescan`, { method: "POST" }),
   removeFile: (id) => request(`/api/files/${id}`, { method: "DELETE" }),
+  resetLibrary: () => request("/api/admin/reset", { method: "POST" }),
   games: (fileId, { q = "", offset = 0, limit = 100 } = {}) =>
     request(`/api/files/${fileId}/games?q=${encodeURIComponent(q)}&offset=${offset}&limit=${limit}`),
   game: (id) => request(`/api/games/${id}`),

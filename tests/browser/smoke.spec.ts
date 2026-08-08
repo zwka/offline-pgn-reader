@@ -1,5 +1,5 @@
 import { expect, test, type Route } from "@playwright/test";
-import { appendFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { resolve } from "node:path";
 import { tmpdir } from "node:os";
@@ -357,6 +357,46 @@ test("shows a changed source as stale and rescans it from the Library", async ({
 
     await card.getByRole("button", { name: "Re-scan (changed)" }).click();
     await expect(card.locator(".badge.ready")).toBeVisible({ timeout: 10_000 });
+  } finally {
+    rmSync(directory, { force: true, recursive: true });
+  }
+});
+
+test("removes indexed records, preserves the source, and reports reset failures", async ({ page }) => {
+  const directory = mkdtempSync(join(tmpdir(), "offline-pgn-reader-browser-library-actions-"));
+  const source = join(directory, "library-actions.pgn");
+  writeFileSync(source, '[Event "Library actions"]\n\n1. e4 *\n');
+  const rejectReset = (route: Route) => route.fulfill({
+    status: 409,
+    contentType: "application/json",
+    body: JSON.stringify({ detail: "cannot reset while a scan is running" }),
+  });
+
+  page.on("dialog", (dialog) => dialog.accept());
+  try {
+    await page.goto("/");
+    await page.locator("#path-input").fill(source);
+    await page.getByRole("button", { name: "Index path" }).click();
+    const card = page.locator(".file-card").filter({ hasText: "library-actions.pgn" });
+    await expect(card).toContainText("1 games", { timeout: 10_000 });
+
+    await card.getByRole("button", { name: "Remove" }).click();
+    await expect(page.locator(".file-card").filter({ hasText: "library-actions.pgn" })).toHaveCount(0);
+    expect(existsSync(source)).toBe(true);
+
+    await page.locator("#path-input").fill(source);
+    await page.getByRole("button", { name: "Index path" }).click();
+    const resetCard = page.locator(".file-card").filter({ hasText: "library-actions.pgn" });
+    await expect(resetCard).toContainText("1 games", { timeout: 10_000 });
+
+    await page.route("**/api/admin/reset", rejectReset);
+    await page.getByRole("button", { name: "Reset Library" }).click();
+    await expect(page.locator('[role="alert"]')).toContainText("cannot reset while a scan is running");
+    await page.unroute("**/api/admin/reset", rejectReset);
+
+    await page.getByRole("button", { name: "Reset Library" }).click();
+    await expect(page.locator(".file-card").filter({ hasText: "library-actions.pgn" })).toHaveCount(0);
+    expect(existsSync(source)).toBe(true);
   } finally {
     rmSync(directory, { force: true, recursive: true });
   }

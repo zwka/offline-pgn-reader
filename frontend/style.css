@@ -87,6 +87,8 @@ kbd {
 
 /* ---------- library ---------- */
 .lib-section { margin-bottom: 22px; }
+.section-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.section-heading h2 { margin-bottom: 12px; }
 .file-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 12px; }
 .file-card {
   background: var(--bg-panel); border: 1px solid var(--border); border-radius: 8px;

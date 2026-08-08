@@ -88,6 +88,9 @@ async function libraryView(viewId) {
   let pollTimer = null;
   let intakeError = null;
   const scanActionErrors = new Map();
+  const removeActionErrors = new Map();
+  let resetError = null;
+  let resetPending = false;
   let renderedFiles = [];
   let renderedDiscovered = [];
   cleanupCurrentView = () => clearTimeout(pollTimer);
@@ -121,6 +124,25 @@ async function libraryView(viewId) {
     }
   }
 
+  async function resetLibrary() {
+    if (resetPending || !confirm("Reset the Library index? Source files are not touched.")) return;
+    resetPending = true;
+    resetError = null;
+    render(renderedFiles, renderedDiscovered);
+    try {
+      await api.resetLibrary();
+      if (!isViewCurrent(viewId)) return;
+      await refresh();
+    } catch (err) {
+      if (isViewCurrent(viewId)) resetError = err instanceof Error ? err.message : String(err);
+    } finally {
+      if (isViewCurrent(viewId)) {
+        resetPending = false;
+        render(renderedFiles, renderedDiscovered);
+      }
+    }
+  }
+
   function fileCard(f) {
     const status = !f.exists
       ? "missing"
@@ -134,6 +156,7 @@ async function libraryView(viewId) {
     const pct = f.progress && f.progress.bytesTotal
       ? Math.round((100 * f.progress.bytesDone) / f.progress.bytesTotal) : null;
     const scanActionError = scanActionErrors.get(f.id);
+    const removeActionError = removeActionErrors.get(f.id);
     return h(
       "div",
       { class: "file-card", onclick: () => (location.hash = `#/file/${f.id}`) },
@@ -152,6 +175,7 @@ async function libraryView(viewId) {
         : null,
       f.scan_error ? h("div", { class: "error-text", style: "font-size:12px;margin-top:6px" }, f.scan_error) : null,
       scanActionError ? h("div", { class: "error-text", role: "alert", style: "font-size:12px;margin-top:6px" }, scanActionError) : null,
+      removeActionError ? h("div", { class: "error-text", role: "alert", style: "font-size:12px;margin-top:6px" }, removeActionError) : null,
       h(
         "div",
         { class: "file-actions" },
@@ -175,8 +199,15 @@ async function libraryView(viewId) {
           onclick: async (e) => {
             e.stopPropagation();
             if (confirm(`Remove "${f.name}" from the index? The source file is not touched.`)) {
-              await api.removeFile(f.id);
-              if (isViewCurrent(viewId)) refresh();
+              try {
+                await api.removeFile(f.id);
+                removeActionErrors.delete(f.id);
+                if (isViewCurrent(viewId)) await refresh();
+              } catch (err) {
+                if (!isViewCurrent(viewId)) return;
+                removeActionErrors.set(f.id, err instanceof Error ? err.message : String(err));
+                render(renderedFiles, renderedDiscovered);
+              }
             }
           },
         }, "Remove")
@@ -196,7 +227,21 @@ async function libraryView(viewId) {
         h(
           "section",
           { class: "lib-section" },
-          h("h2", {}, "Indexed PGN files"),
+          h(
+            "div",
+            { class: "section-heading" },
+            h("h2", {}, "Indexed PGN files"),
+            h(
+              "button",
+              {
+                class: "ghost-btn",
+                disabled: resetPending ? "" : null,
+                onclick: resetLibrary,
+              },
+              resetPending ? "Resetting..." : "Reset Library",
+            ),
+          ),
+          resetError ? h("div", { class: "request-error", role: "alert" }, `Could not reset Library: ${resetError}`) : null,
           files.length
             ? h("div", { class: "file-grid" }, files.map(fileCard))
             : h("div", { class: "empty-note" }, "No files indexed yet — add one below.")

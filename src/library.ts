@@ -170,6 +170,21 @@ export class LibraryService {
     return sources.map((source) => this.toFileRecord(source));
   }
 
+  removeFile(fileId: number): void {
+    this.getFile(fileId);
+    this.withoutActiveScan(fileId);
+    const deleted = this.database.withConnection((database) =>
+      database.prepare("DELETE FROM files WHERE id=?").run(fileId),
+    );
+    if (deleted.changes === 0) throw new NotFound(`file ${fileId} not found`);
+  }
+
+  resetIndex(): void {
+    this.withoutActiveScan();
+    this.database.reset();
+    this.progress.clear();
+  }
+
   getFile(fileId: number): FileRecord {
     const source = this.database.withConnection((database) =>
       database
@@ -359,6 +374,32 @@ export class LibraryService {
     this.activeScans.clear();
     this.progress.clear();
     await Promise.allSettled(scans.map((scan) => scan.worker.terminate()));
+  }
+
+  private withoutActiveScan(fileId?: number): void {
+    // A worker clears activeScans after its transaction commits `ready`; the
+    // persisted state is the authoritative protection boundary.
+    if (this.databaseHasActiveScan(fileId)) {
+      throw new ServiceError(
+        fileId === undefined
+          ? "cannot reset while a scan is running"
+          : "cannot remove file while a scan is running",
+        409,
+      );
+    }
+  }
+
+  private databaseHasActiveScan(fileId?: number): boolean {
+    return this.database.withConnection((database) => {
+      const row = fileId === undefined
+        ? database
+            .prepare("SELECT 1 AS active FROM files WHERE scan_status='scanning' LIMIT 1")
+            .get() as { active: number } | undefined
+        : database
+            .prepare("SELECT 1 AS active FROM files WHERE id=? AND scan_status='scanning'")
+            .get(fileId) as { active: number } | undefined;
+      return row !== undefined;
+    });
   }
 
   discover(): DiscoveredSource[] {

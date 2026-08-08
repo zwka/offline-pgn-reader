@@ -1,5 +1,5 @@
 import Database from "better-sqlite3";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, rmSync } from "node:fs";
 import { dirname } from "node:path";
 
 export const SCHEMA_VERSION = 1;
@@ -90,6 +90,13 @@ export class LibraryDatabase {
     } finally {
       database.close();
     }
+  }
+
+  reset(): void {
+    for (const suffix of ["", "-wal", "-shm", "-journal"]) {
+      rmSync(`${this.path}${suffix}`, { force: true });
+    }
+    this.initialize();
   }
 
   withConnection<T>(work: (database: SqliteConnection) => T): T {

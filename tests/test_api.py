@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import time
+import sqlite3
 
 import pytest
 from fastapi.testclient import TestClient
 
+from pgnreader import SCHEMA_VERSION
 from pgnreader.api import create_app
 
 from .conftest import FIXTURES
@@ -225,15 +227,40 @@ def test_discover(client, settings, fixture_copy):
 
 
 def test_delete_file(client, fixture_copy):
-    f = register(client, fixture_copy("basic_two_games.pgn"))
+    source = fixture_copy("basic_two_games.pgn")
+    original = source.read_bytes()
+    f = register(client, source)
+    assert client.get(f"/api/files/{f['id']}/games").json()["total"] == 2
     assert client.delete(f"/api/files/{f['id']}").status_code == 204
+    assert source.read_bytes() == original
     assert client.get(f"/api/files/{f['id']}").status_code == 404
 
 
-def test_admin_reset(client, fixture_copy):
-    register(client, fixture_copy("basic_two_games.pgn"))
-    assert client.post("/api/admin/reset").status_code == 200
+def test_admin_reset(client, settings, fixture_copy):
+    source = fixture_copy("basic_two_games.pgn")
+    original = source.read_bytes()
+    register(client, source)
+    response = client.post("/api/admin/reset")
+    assert response.status_code == 200
+    assert response.json() == {"status": "reset"}
     assert client.get("/api/files").json() == []
+    assert source.read_bytes() == original
+    with sqlite3.connect(settings.db_path) as conn:
+        assert conn.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()[0] == str(SCHEMA_VERSION)
+        assert conn.execute("SELECT COUNT(*) FROM files").fetchone()[0] == 0
+        assert conn.execute("SELECT COUNT(*) FROM games").fetchone()[0] == 0
+
+
+def test_admin_reset_rejects_an_active_scan(client, fixture_copy):
+    f = register(client, fixture_copy("basic_two_games.pgn"))
+    service = client.app.state.service
+    with service.db.connect() as conn:
+        conn.execute("UPDATE files SET scan_status='scanning' WHERE id=?", (f["id"],))
+    response = client.post("/api/admin/reset")
+    with service.db.connect() as conn:
+        conn.execute("UPDATE files SET scan_status='ready' WHERE id=?", (f["id"],))
+    assert response.status_code == 409
+    assert response.json() == {"detail": "cannot reset while a scan is running"}
 
 
 def test_unknown_game_404(client):

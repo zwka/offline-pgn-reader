@@ -13,6 +13,7 @@ import sys
 from .config import settings
 from .db import Database
 from .logging_setup import configure_logging
+from .service import LibraryService, ServiceError
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -48,8 +49,6 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.cmd == "index":
-        from .service import LibraryService
-
         db = Database(settings.db_path)
         db.initialize()
         svc = LibraryService(db, settings)
@@ -64,7 +63,13 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.cmd == "reset":
         db = Database(settings.db_path)
-        db.reset()
+        db.initialize()
+        service = LibraryService(db, settings)
+        try:
+            service.reset_index()
+        except ServiceError as exc:
+            print(f"Reset failed: {exc}", file=sys.stderr)
+            return 1
         print(f"Index reset: {settings.db_path}")
         return 0
 

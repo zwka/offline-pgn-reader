@@ -15,6 +15,7 @@ import {
   GamePageSchema,
   HealthResponseSchema,
   RegisterFileRequestSchema,
+  ResetResponseSchema,
   TagPairsSchema,
   type ErrorResponse,
   type RegisterFileRequest,
@@ -120,6 +121,19 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     async (request) => library.getFile(Number(request.params.fileId)),
   );
 
+  app.delete<{ Params: { fileId: string } }>(
+    "/api/files/:fileId",
+    {
+      schema: {
+        params: Type.Object({ fileId: Type.String({ pattern: "^[1-9][0-9]*$" }) }),
+      },
+    },
+    async (request, reply) => {
+      library.removeFile(Number(request.params.fileId));
+      return reply.code(204).send();
+    },
+  );
+
   app.post<{
     Params: { fileId: string };
     Querystring: { force?: "true" | "false" };
@@ -139,6 +153,15 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
         request.query.force !== "false",
       );
       return { ...library.getFile(Number(request.params.fileId)), scanStarted };
+    },
+  );
+
+  app.post(
+    "/api/admin/reset",
+    { schema: { response: { 200: ResetResponseSchema } } },
+    async () => {
+      library.resetIndex();
+      return { status: "reset" };
     },
   );
 

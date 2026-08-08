@@ -9,6 +9,7 @@ import time
 import pytest
 
 import pgnreader.service as service_module
+from pgnreader import SCHEMA_VERSION
 from pgnreader.db import Database
 from pgnreader.service import LibraryService, NotFound, ServiceError
 
@@ -221,10 +222,40 @@ def test_difficult_source_index_and_later_game_reads(service, tmp_path):
 def test_remove_file(service, fixture_copy):
     p = fixture_copy("basic_two_games.pgn")
     info = register_and_scan(service, p)
+    assert service.list_games(info["id"])["total"] == 2
     service.remove_file(info["id"])
     assert p.exists(), "source file must never be deleted"
+    with service.db.connect() as conn:
+        assert conn.execute("SELECT COUNT(*) FROM games WHERE file_id=?", (info["id"],)).fetchone()[0] == 0
     with pytest.raises(NotFound):
         service.get_file(info["id"])
+
+
+def test_reset_recreates_versioned_index_and_preserves_sources(service, fixture_copy):
+    p = fixture_copy("basic_two_games.pgn")
+    source_bytes = p.read_bytes()
+    info = register_and_scan(service, p)
+    assert service.list_games(info["id"])["total"] == 2
+
+    service.reset_index()
+
+    assert p.read_bytes() == source_bytes
+    assert service.list_files() == []
+    with service.db.connect() as conn:
+        assert conn.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()["value"] == str(SCHEMA_VERSION)
+        assert conn.execute("SELECT COUNT(*) FROM files").fetchone()[0] == 0
+        assert conn.execute("SELECT COUNT(*) FROM games").fetchone()[0] == 0
+
+
+def test_remove_and_reset_reject_active_scans(service, fixture_copy):
+    p = fixture_copy("basic_two_games.pgn")
+    info = service.register_file(p, scan=False)
+    with service.db.connect() as conn:
+        conn.execute("UPDATE files SET scan_status='scanning' WHERE id=?", (info["id"],))
+    with pytest.raises(ServiceError, match="cannot remove file while a scan is running"):
+        service.remove_file(info["id"])
+    with pytest.raises(ServiceError, match="cannot reset while a scan is running"):
+        service.reset_index()
 
 
 def test_missing_source_file_reported(service, fixture_copy):

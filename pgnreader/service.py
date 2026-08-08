@@ -138,11 +138,30 @@ class LibraryService:
         return self._file_dict(row)
 
     def remove_file(self, file_id: int) -> None:
-        with self.db.connect() as conn:
-            cur = conn.execute("DELETE FROM files WHERE id=?", (file_id,))
-            if cur.rowcount == 0:
-                raise NotFound(f"file {file_id} not found")
+        self.get_file(file_id)
+        with self._lock:
+            self._assert_no_active_scans_locked(file_id)
+            with self.db.connect() as conn:
+                cur = conn.execute("DELETE FROM files WHERE id=?", (file_id,))
+                if cur.rowcount == 0:
+                    raise NotFound(f"file {file_id} not found")
         log.info("unregistered file #%s (source file untouched)", file_id)
+
+    def _assert_no_active_scans_locked(self, file_id: int | None = None) -> None:
+        query = "SELECT 1 FROM files WHERE scan_status='scanning'"
+        params: tuple[int, ...] = ()
+        if file_id is not None:
+            query += " AND id=?"
+            params = (file_id,)
+        with self.db.connect() as conn:
+            if conn.execute(query + " LIMIT 1", params).fetchone() is not None:
+                self._raise_scan_protection_error(file_id)
+
+    @staticmethod
+    def _raise_scan_protection_error(file_id: int | None) -> None:
+        if file_id is None:
+            raise ServiceError("cannot reset while a scan is running", status=409)
+        raise ServiceError("cannot remove file while a scan is running", status=409)
 
     def _file_dict(self, row) -> dict[str, Any]:
         d = dict(row)
@@ -431,7 +450,6 @@ class LibraryService:
 
     def reset_index(self) -> None:
         with self._lock:
-            if self._active_scans:
-                raise ServiceError("cannot reset while a scan is running", status=409)
-        self.db.reset()
+            self._assert_no_active_scans_locked()
+            self.db.reset()
         log.warning("index database reset by request")

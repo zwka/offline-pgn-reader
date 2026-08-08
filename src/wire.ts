@@ -18,6 +18,13 @@ export const ErrorResponseSchema = Type.Object(
 
 export type ErrorResponse = Static<typeof ErrorResponseSchema>;
 
+export const ResetResponseSchema = Type.Object(
+  { status: Type.Literal("reset") },
+  { additionalProperties: false },
+);
+
+export type ResetResponse = Static<typeof ResetResponseSchema>;
+
 export const ScanStatusSchema = Type.Union([
   Type.Literal("pending"),
   Type.Literal("scanning"),
