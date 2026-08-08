@@ -422,7 +422,11 @@ class LibraryService:
         extra = [f"index warning: {row['warning']}"] if row["warning"] else []
         data = self._read_game_bytes(row)
         try:
-            doc = hydrate_game(data, extra_warnings=extra)
+            doc = hydrate_game(
+                data,
+                extra_warnings=extra,
+                stored_headers=_stored_headers(row["tag_json"]),
+            )
         except GameParseError as exc:
             raise ServiceError(f"game could not be parsed: {exc}", status=422) from exc
         out = doc.to_dict()
@@ -453,3 +457,23 @@ class LibraryService:
             self._assert_no_active_scans_locked()
             self.db.reset()
         log.warning("index database reset by request")
+
+
+def _stored_headers(raw: str) -> list[tuple[str, str]] | None:
+    try:
+        pairs = json.loads(raw)
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(pairs, list):
+        return None
+    headers: list[tuple[str, str]] = []
+    for pair in pairs:
+        if (
+            not isinstance(pair, list)
+            or len(pair) != 2
+            or not isinstance(pair[0], str)
+            or not isinstance(pair[1], str)
+        ):
+            return None
+        headers.append((pair[0], pair[1]))
+    return headers

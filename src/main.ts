@@ -157,6 +157,7 @@ async function runIndex(
       new LibraryDatabase(appConfig.dbPath),
       appConfig.watchDirs,
       appConfig.uploadDir,
+      appConfig.maxGameBytes,
     );
     for (const path of command.paths) {
       const registered = service.registerFile(path, false);
@@ -189,6 +190,7 @@ async function runReset(
       new LibraryDatabase(appConfig.dbPath),
       appConfig.watchDirs,
       appConfig.uploadDir,
+      appConfig.maxGameBytes,
     );
     service.resetIndex();
     stdout(`Index reset: ${appConfig.dbPath}`);

@@ -1,0 +1,10 @@
+{
+  "missingFile": {
+    "status": 404,
+    "body": {"detail": "file 999999 not found"}
+  },
+  "missingGame": {
+    "status": 404,
+    "body": {"detail": "game 999999 not found"}
+  }
+}

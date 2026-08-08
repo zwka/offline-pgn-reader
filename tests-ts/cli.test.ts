@@ -30,6 +30,8 @@ function testConfig(directory: string): AppConfig {
     host: "127.0.0.1",
     port: 8642,
     version: "1.1.0",
+    debug: false,
+    maxGameBytes: 8 * 1024 * 1024,
     frontendDir: resolve("frontend"),
     dbPath: join(directory, "data", "index.sqlite3"),
     watchDirs: [],

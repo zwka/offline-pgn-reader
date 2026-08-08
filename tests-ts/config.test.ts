@@ -34,4 +34,17 @@ describe("local process configuration", () => {
 
     expect(configured.uploadDir).toBe(join(homedir(), "pgn-library"));
   });
+
+  it("keeps debug and hydration limits configurable like Python", () => {
+    const configured = readConfig({
+      PGNREADER_DEBUG: "yes",
+      PGNREADER_MAX_GAME_BYTES: "4096",
+    });
+
+    expect(configured.debug).toBe(true);
+    expect(configured.maxGameBytes).toBe(4096);
+    expect(() => readConfig({ PGNREADER_MAX_GAME_BYTES: "0" })).toThrow(
+      "PGNREADER_MAX_GAME_BYTES must be a positive integer",
+    );
+  });
 });

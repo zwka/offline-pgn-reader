@@ -26,7 +26,7 @@ import type {
   GamePage,
 } from "./wire.js";
 
-const MAX_GAME_BYTES = 8 * 1024 * 1024;
+const DEFAULT_MAX_GAME_BYTES = 8 * 1024 * 1024;
 
 type FileRow = {
   id: number;
@@ -112,6 +112,7 @@ export class LibraryService {
     private readonly database: LibraryDatabase,
     private readonly watchDirs: string[],
     private readonly uploadDir: string,
+    private readonly maxGameBytes = DEFAULT_MAX_GAME_BYTES,
   ) {
     this.database.initialize();
     this.recoverInterruptedScans();
@@ -581,7 +582,7 @@ export class LibraryService {
       row.file_path,
       row.offset_start,
       row.offset_end,
-      MAX_GAME_BYTES,
+      this.maxGameBytes,
     );
     try {
       if (fingerprintFile(row.file_path) !== row.file_fingerprint) {

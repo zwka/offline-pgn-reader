@@ -1,13 +1,12 @@
 # Offline PGN Reader
 
-A fully offline PGN reader and study interface: Python runtime + browser UI,
-built for reading large, heavily annotated PGN files (Chessable-style course
-exports, game collections, opening files) on a normal laptop. A Node.js/TypeScript
-bootstrap runtime is available for the incremental migration and serves the same
-local browser shell and health path. No cloud, no SaaS, no external assets —
-everything runs from this folder.
+A fully offline PGN reader and study interface: Node.js/TypeScript runtime +
+browser UI, built for reading large, heavily annotated PGN files (Chessable-style
+course exports, game collections, opening files) on a normal laptop. The Python
+runtime remains available only as the documented rollback path and test oracle.
+No cloud, no SaaS, no external assets — everything runs from this folder.
 
-![stack](https://img.shields.io/badge/stack-FastAPI%20%2B%20SQLite%20%2B%20vanilla%20JS-334)
+![stack](https://img.shields.io/badge/stack-Node%2FTypeScript%20%2B%20SQLite%20%2B%20vanilla%20JS-334)
 
 ## Features
 
@@ -33,12 +32,13 @@ everything runs from this folder.
 
 ## Requirements
 
-- Python 3.11+ (tested on 3.14)
+- Node.js 24.11.1 and npm 11.6.0 for the production process (see `.nvmrc`)
+- Python 3.11+ (tested on 3.14) for rollback and the oracle test suite
 - A Chromium-based browser (built for Brave; Chrome/Edge work identically)
 
 ## Setup (one time)
 
-Install the Node.js migration runtime:
+Install the production Node.js runtime:
 
 ```bash
 cd offline-pgn-reader
@@ -46,7 +46,7 @@ nvm use
 npm install
 ```
 
-Set up the pre-cutover Python runtime and test oracle:
+Set up the optional Python rollback runtime and test oracle:
 
 ```bash
 python3 -m venv .venv
@@ -57,36 +57,35 @@ Everything after this point is fully offline.
 
 ## Run
 
-The Node.js/TypeScript bootstrap uses Node.js `24.11.1` and npm `11.6.0` (see
-`.nvmrc` and `package.json`). Install its dependencies and start the same
-local address with:
+Production starts the single Node.js/TypeScript process at the local address:
 
 ```bash
-npm install
-npm run dev
+npm start
 # → http://127.0.0.1:8642
 ```
 
-Until the parity gate and release acceptance are complete, the current Python
-application remains the full-reader path at the same address and is retained
-for rollback and oracle validation:
+For local development, `npm run dev` starts the same TypeScript process. The
+Python application is not part of the production startup path. Keep it
+available only for rollback and oracle validation until release acceptance:
 
 ```bash
 .venv/bin/python -m pgnreader serve
 ```
 
-TypeScript checks and browser verification are available alongside the Python
-oracle. Install the Playwright browser once before the smoke test:
+TypeScript checks, the Python oracle, cross-runtime parity, and browser
+verification are available together. Install the Playwright browser once:
 
 ```bash
 npm run typecheck
 npm test
+npm run test:python
+npm run test:parity
 npx playwright install chromium
 npm run test:browser
-npm run test:python
 ```
 
-`npm run test:all` runs those checks in one command.
+`npm run test:all` runs type checking, Vitest, the Python oracle, parity checks,
+and Playwright in one command.
 
 Files in `samples/` and `library/` are auto-discovered on the Library page —
 one click indexes them. You can also paste any absolute path, or upload a
@@ -96,11 +95,12 @@ copy (stored in `library/`).
 
 | Action | Command |
 |---|---|
-| Start server | `.venv/bin/python -m pgnreader serve` |
-| Index file(s) from the terminal | `.venv/bin/python -m pgnreader index path/to/file.pgn` |
-| Force re-index | `.venv/bin/python -m pgnreader index --force path/to/file.pgn` |
-| Reset the index cache | `.venv/bin/python -m pgnreader reset` |
-| Run tests | `.venv/bin/python -m pytest` |
+| Start production server | `npm start` |
+| Index file(s) from the terminal | `npm start -- index path/to/file.pgn` |
+| Force re-index | `npm start -- index --force path/to/file.pgn` |
+| Reset the index cache | `npm start -- reset` |
+| Start the rollback server | `.venv/bin/python -m pgnreader serve` |
+| Run the Python oracle alone | `npm run test:python` |
 
 ## Keyboard shortcuts (reader)
 
@@ -121,6 +121,10 @@ Environment variables (all optional):
 | `PGNREADER_DEBUG` | off | verbose console logging |
 | `PGNREADER_MAX_GAME_BYTES` | 8 MiB | per-game hydration safety cap |
 
+`PGNREADER_*` values are consumed by both runtimes. The Node.js process is the
+production owner of the database and browser routes; Python must use a separate
+data directory when it is run as the rollback or oracle process.
+
 ## Data & backup
 
 `data/index.sqlite3` is a **disposable cache** derived from your PGN files —
@@ -136,13 +140,14 @@ version:
 
 ```
 frontend/            vanilla-JS SPA (board, notation tree, library)
-pgnreader/api.py     FastAPI routes + static hosting
-pgnreader/service.py library ops, background scans, retrieval
-pgnreader/scanner.py streaming boundary scanner (index layer, no movetext parse)
-pgnreader/parser.py  per-game hydration via python-chess → document model
-pgnreader/models.py  explicit move-tree document model
-pgnreader/db.py      SQLite cache (schema-versioned, WAL)
-tests/               pytest suite incl. samples/ regression fixtures
+src/server.ts        Fastify routes + static hosting (production)
+src/library.ts       library ops, background scans, retrieval
+src/scanner.ts       streaming boundary scanner (index layer, no movetext parse)
+src/hydration.ts     per-game hydration via chess.js → document model
+src/database.ts      SQLite cache (schema-versioned, WAL)
+pgnreader/           Python rollback runtime and oracle implementation
+tests/               Python oracle and shared regression fixtures
+tests-ts/             TypeScript and cross-runtime parity tests
 ```
 
 ## Known limitations

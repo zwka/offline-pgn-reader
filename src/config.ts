@@ -10,6 +10,8 @@ export type AppConfig = {
   host: string;
   port: number;
   version: string;
+  debug: boolean;
+  maxGameBytes: number;
   frontendDir: string;
   dbPath: string;
   watchDirs: string[];
@@ -22,6 +24,18 @@ function readPort(raw: string | undefined): number {
     throw new Error("PGNREADER_PORT must be an integer between 1 and 65535");
   }
   return port;
+}
+
+function readPositiveInteger(raw: string | undefined, fallback: number, name: string): number {
+  const value = Number(raw ?? fallback);
+  if (!Number.isInteger(value) || value < 1) {
+    throw new Error(`${name} must be a positive integer`);
+  }
+  return value;
+}
+
+function readBoolean(raw: string | undefined): boolean {
+  return ["1", "true", "yes"].includes((raw ?? "").toLowerCase());
 }
 
 function resolveConfiguredPath(raw: string | undefined, fallback: string): string {
@@ -50,6 +64,12 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     host: env.PGNREADER_HOST ?? "127.0.0.1",
     port: readPort(env.PGNREADER_PORT),
     version: APP_VERSION,
+    debug: readBoolean(env.PGNREADER_DEBUG),
+    maxGameBytes: readPositiveInteger(
+      env.PGNREADER_MAX_GAME_BYTES,
+      8 * 1024 * 1024,
+      "PGNREADER_MAX_GAME_BYTES",
+    ),
     frontendDir: fileURLToPath(new URL("../frontend/", import.meta.url)),
     dbPath: resolve(dataDir, "index.sqlite3"),
     watchDirs: resolveConfiguredPaths(env.PGNREADER_WATCH_DIRS, [

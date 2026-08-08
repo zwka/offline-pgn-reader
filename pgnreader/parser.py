@@ -30,7 +30,11 @@ class GameParseError(Exception):
     """The byte span could not be parsed as a PGN game at all."""
 
 
-def hydrate_game(source_bytes: bytes, extra_warnings: list[str] | None = None) -> GameDocument:
+def hydrate_game(
+    source_bytes: bytes,
+    extra_warnings: list[str] | None = None,
+    stored_headers: list[tuple[str, str]] | None = None,
+) -> GameDocument:
     source = source_bytes.decode("utf-8", errors="replace")
     # Keep the decoded source exact, but do not let a UTF-8 BOM become movetext.
     parse_text, _ = _promote_semicolon_comments(source.removeprefix("\ufeff"))
@@ -118,7 +122,7 @@ def hydrate_game(source_bytes: bytes, extra_warnings: list[str] | None = None) -
         nodes[doc_id].children.append(node.id)
         stack.append((child, node.id, 0))
 
-    headers = list(game.headers.items())
+    headers = stored_headers if stored_headers is not None else list(game.headers.items())
     return GameDocument(
         headers=headers,
         nodes=nodes,
@@ -278,8 +282,11 @@ def _extract_shapes(comment: str) -> tuple[str, list[dict], list[dict]]:
 def _comment_text(comment: object) -> str:
     """python-chess >=1.11 may expose comments as a list of strings."""
     if isinstance(comment, list):
-        return "\n\n".join(str(c) for c in comment)
-    return str(comment or "")
+        text = "\n\n".join(str(c) for c in comment)
+    else:
+        text = str(comment or "")
+    # Keep the wire representation stable with the chess.js parser used by Node.
+    return re.sub(r"[\r\n]+", " ", text)
 
 
 def _format_error(err: Exception) -> str:

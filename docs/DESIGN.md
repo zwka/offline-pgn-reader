@@ -1,6 +1,6 @@
 # Offline PGN Reader — Design & Architecture Record
 
-Status: v1.0 · Date: 2026-07-09 · Audience: solo maintainer
+Status: v1.1.0 · Date: 2026-08-08 · Audience: solo maintainer
 
 ---
 
@@ -8,7 +8,8 @@ Status: v1.0 · Date: 2026-07-09 · Audience: solo maintainer
 
 **In scope (v1)**
 
-- Fully offline local web app: Python backend + browser UI served at `http://127.0.0.1:8642`.
+- Fully offline local web app: Node.js/TypeScript backend + browser UI served at `http://127.0.0.1:8642`.
+- Python remains available as the rollback runtime and compatibility oracle until release acceptance.
 - Register local PGN files (by path, by discovery in watch dirs, or by upload-copy into `library/`).
 - Streaming index of arbitrarily large PGN files: game boundaries, byte offsets, headers → SQLite.
 - Lazy hydration of a single game by byte span into a full-fidelity move-tree document.
@@ -31,15 +32,15 @@ from `%cal/%csl`, full-text comment search.
   suffix annotations (`!?`) and numeric NAGs, heavy RAV nesting, `*` results.
 - "Large" means multi-hundred-MB files / millions of games for the *index* path; individual games
   stay small enough (< a few MB) to hydrate eagerly once selected.
-- Python 3.11+ available (3.14 on the target machine); Brave (Chromium) is the target browser.
+- Node.js 24.11.1 and npm 11.6.0 run production; Python 3.11+ is available for rollback and oracle checks; Brave (Chromium) is the target browser.
 
 ## 3. Architecture decisions (ADR)
 
 | Decision | Choice | Rationale / trade-off |
 |---|---|---|
-| Web framework | **FastAPI** | Typed request/response models via Pydantic, async-capable, auto OpenAPI docs for a solo dev, uvicorn is a single lightweight dependency. Flask would need marshmallow/manual validation to match. |
+| Web framework | **Fastify** | Typed route seams via TypeBox, low-overhead local HTTP, multipart/static plugins, and one Node process for production. FastAPI remains the rollback runtime and oracle. |
 | Index store | **SQLite** (WAL) | Zero-ops, single file in `data/`, fast enough for millions of rows, trivially backed up. Schema-versioned; rebuildable from source PGNs at any time (cache, not source of truth). |
-| PGN parsing | **Two-layer: custom streaming scanner for indexing + python-chess for hydration** | python-chess has excellent SAN/RAV/NAG/comment fidelity but its reader parses movetext fully — too slow for index-only scans of huge files. The scanner never parses movetext; it only finds boundaries and tag lines. Verified empirically that python-chess 1.11 handles every quirk in the sample files. |
+| PGN parsing | **Two-layer: custom streaming scanner for indexing + chess.js for hydration** | chess.js supplies the production SAN/RAV/NAG/FEN implementation while the scanner remains movetext-free for large indexes. The Python `python-chess` implementation runs against the same fixtures as the compatibility oracle. |
 | Board state | **Server computes FEN per node during hydration** | UI never replays moves; every node carries its position. Costs response size (~100 bytes/node), saves all client-side chess logic and repeated recomputation. |
 | Frontend | **Vanilla ES modules, no build step** | One dev, offline, no toolchain rot. ~1.5k lines of JS is well within no-framework territory. Board uses Unicode chess glyphs styled via CSS (no external assets). |
 | Concurrency | Scan runs in a background thread; SQLite connection-per-operation with WAL | Keeps API responsive during multi-GB scans; progress polled via `GET /api/files/{id}`. |
@@ -47,8 +48,8 @@ from `%cal/%csl`, full-text comment search.
 
 ## 4. Parser strategy
 
-**Layer A — boundary scanner (`scanner.py`), index time.** Binary line iteration with manual byte
-offset accounting (`offset += len(line)`), so offsets are exact regardless of encoding. State
+**Layer A — boundary scanner (`src/scanner.ts`, with the Python oracle counterpart), index time.**
+Binary line iteration with manual byte offset accounting, so offsets are exact regardless of encoding. State
 machine: `GAP → TAGS → MOVETEXT → (tag line seen) → boundary`. Crucially it tracks *brace-comment
 state across lines* so a `[` at line start inside a multi-line `{comment}` is not misread as a new
 game. Handles UTF-8 BOM, CRLF, `%` escape lines, `;` rest-of-line comments. Tag pairs are extracted
@@ -57,18 +58,18 @@ never produce a valid tag section still become records (flagged `warning`) as lo
 attributable; garbage between games is attached to the following boundary decision, never crashes
 the scan.
 
-**Layer B — hydrator (`parser.py`), read time.** Seek to `offset_start`, read
-`offset_end - offset_start` bytes, decode UTF-8 (`errors="replace"`), feed to
-`chess.pgn.read_game`. python-chess yields the full recursive game tree: `comment`,
-`starting_comment`, `nags`, variations, `[FEN]/[SetUp]` starting positions, and collects
-non-fatal issues in `game.errors` (surfaced as document warnings). The tree is converted
-iteratively (explicit stack — nesting depth bounded, but no recursion-limit risk) into the
-document model below.
+**Layer B — hydrator (`src/hydration.ts`), read time.** Seek to `offset_start`, read
+`offset_end - offset_start` bytes, decode UTF-8 (`errors="replace"`), and feed the span to
+chess.js. The parser yields the full recursive game tree: comments, starting comments, NAGs,
+variations, and `[FEN]/[SetUp]` starting positions. The tree is converted iteratively
+(explicit stack — nesting depth bounded, but no recursion-limit risk) into the document model
+below. `pgnreader/parser.py` provides the same operation through python-chess for rollback and
+parity checks.
 
-**Known fidelity limits (python-chess, documented not hidden):** multiple consecutive brace
-comments on one move are merged into one comment string; `;` comments are folded into brace-style
-comments; escape lines (`%`) are dropped from the parsed model. The *original* text is always
-recoverable via the raw-source endpoint.
+**Known fidelity limits (documented not hidden):** multiple consecutive brace comments on one move
+are merged into one comment string; `;` comments are folded into brace-style comments; escape lines
+(`%`) are dropped from the parsed model. The *original* text is always recoverable via the
+raw-source endpoint.
 
 ## 5. Indexing strategy
 
@@ -147,18 +148,24 @@ Frontend served statically at `/`. Errors: consistent `{detail}` with 404/409/42
 
 ## 10. Testing strategy
 
-pytest; synthetic fixtures in `tests/fixtures/` cover each PGN feature in isolation; the user's
-`samples/` files are wired in as first-class regression fixtures (auto-skipped if absent).
+Vitest, pytest, and a cross-runtime parity test; synthetic fixtures in `tests/fixtures/` cover
+each PGN feature in isolation; the user's `samples/` files are wired in as first-class
+regression fixtures (auto-skipped if absent).
 Layers: scanner unit tests (boundaries, offsets, BOM/CRLF, comment-brace traps, malformed),
 parser fidelity tests (comments, NAGs, RAVs, FEN starts, round-trip re-parse), service tests
 (fingerprint/re-scan), API integration tests (httpx/TestClient), large-file test (generated
 multi-thousand-game file, asserts index without hydration), sample regression tests (exact game
-counts 185/351, annotation spot checks). UI smoke via manual checklist + browser preview.
+counts 185/351, annotation spot checks). UI smoke via Playwright. The parity test runs both HTTP
+implementations against the same source manifest and separate SQLite files, then compares scan
+records, schema columns, indexed offsets, wire casing, ordered Tag pairs, flat GameDocument
+nodes, and route error envelopes.
 
 ## 11. Release strategy
 
-Single folder, `python -m venv` + `pip install -r requirements.txt`; run via
-`python -m pgnreader serve`. CLI subcommands: `serve`, `index <path>`, `reset`.
+Single folder, `npm install`; production runs via `npm start` and owns the local HTTP routes and
+SQLite cache. TypeScript CLI subcommands are `serve`, `index <path>`, and `reset`. The Python
+environment is optional and is retained only for `python -m pgnreader serve` rollback and oracle
+validation until release acceptance.
 `data/` (DB + logs) is disposable cache — backup is optional, rebuild is one command.
 CHANGELOG.md tracks releases; schema version bump ⇒ automatic rebuild.
 

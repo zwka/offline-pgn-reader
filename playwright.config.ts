@@ -17,7 +17,7 @@ export default defineConfig({
     ...devices["Desktop Chrome"],
   },
   webServer: {
-    command: "npm run dev",
+    command: "npm start",
     env: {
       PGNREADER_DATA_DIR: browserDataDir,
       PGNREADER_PORT: port,

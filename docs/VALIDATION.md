@@ -1,11 +1,11 @@
-# Validation Report — v1.0.0 (2026-07-09)
+# Validation Report — v1.1.0 (2026-08-08)
 
 Every subsystem below lists: failure modes considered, how it is tested,
 the observed result, and remediation if it fails in the field.
 
-Test suite: `pytest` — **55 tests, all passing** (scanner 11, parser 14,
-service 11, API 13, sample regression 6). Sample files in `samples/` are
-first-class fixtures and auto-skip when absent.
+The Python suite remains the rollback oracle. The TypeScript suite owns
+production behavior; the cross-runtime parity test uses the same ten source
+fixtures and separate SQLite databases for both implementations.
 
 | # | Area | Failure modes | Tested by | Result | Remediation |
 |---|------|---------------|-----------|--------|-------------|
@@ -23,7 +23,7 @@ first-class fixtures and auto-skip when absent.
 | 12 | Browser compatibility (Brave) | Chromium rendering, no external assets | manual smoke in Chromium preview: library, table, reader, keyboard nav, variation cycling | ✅ zero console errors; no network beyond localhost | vanilla JS + standard CSS only, no CDN |
 | 13 | Notation rendering | variation context loss, comment blobs, huge trees freezing tab | browser verification against known source text; chunked rendering ≥1500 nodes/frame | ✅ sidelines indented/collapsible; source text matched rendering | progressive render caps main-thread work per frame |
 | 14 | Navigation correctness | wrong sibling cycling, dead ends | browser test: `g5 → h4?! → g5` cycle over a real 3-way branch; `End`/`Home` | ✅ matches document tree exactly | keyboard map documented in help overlay |
-| 15 | Startup/shutdown | port conflicts, schema drift, dirty WAL | `test_health`, schema-version rebuild logic in `db.initialize()` | ✅ health endpoint reports db state; version mismatch rebuilds cache | `python -m pgnreader reset`; DB is disposable |
+| 15 | Startup/shutdown | port conflicts, schema drift, dirty WAL | `npm start`, `test_health`, schema-version rebuild logic in `database.initialize()` | ✅ Node health endpoint reports db state; version mismatch rebuilds cache | `npm start -- reset`; Python reset remains rollback-only |
 
 ## Debugging pass findings (fixed during review)
 
@@ -38,6 +38,16 @@ first-class fixtures and auto-skip when absent.
    via the branch-point check.
 4. **O(n²) trap avoided**: `node.board()` in python-chess replays from the
    root; hydration uses a single incrementally pushed/popped board instead.
+
+## TypeScript cutover validation
+
+| Area | Check | Result |
+|---|---|---|
+| Cross-runtime PGN parity | `npm run test:parity` | ✅ Fastify and FastAPI compare the same scan records, source spans, ordered headers, flat nodes, comments, NAGs, FEN positions, graphics, malformed warnings, and duplicate Tag pairs |
+| SQLite parity | parity snapshot | ✅ separate databases expose schema version 1, matching table columns, indexed fields, byte offsets, tag JSON pairs, and scan state |
+| HTTP compatibility | parity snapshot + `wire_contract.json` + `error_contract.json` | ✅ health, existing routes, camelCase/snake_case wire casing, source text, Tag endpoint, and error envelopes match |
+| Full gate | `npm run test:all` | ✅ typecheck, Vitest, Python oracle, parity, and Playwright run in one command |
+| Production process | `npm start` / `src/main.ts` | ✅ Node.js/TypeScript starts the production server; Python remains documented as rollback-only until release acceptance |
 
 ## Honest gaps (not fixed in v1)
 

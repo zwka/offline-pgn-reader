@@ -33,10 +33,15 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
   const { databaseProbe, ...configOverrides } = options;
   const appConfig: AppConfig = { ...defaultConfig, ...configOverrides };
   const database = new LibraryDatabase(appConfig.dbPath);
-  const library = new LibraryService(database, appConfig.watchDirs, appConfig.uploadDir);
+  const library = new LibraryService(
+    database,
+    appConfig.watchDirs,
+    appConfig.uploadDir,
+    appConfig.maxGameBytes,
+  );
   const probe = databaseProbe ?? createSqliteProbe(appConfig.dbPath);
   const app = Fastify({
-    logger: true,
+    logger: { level: appConfig.debug ? "debug" : "info" },
     ajv: { customOptions: { coerceTypes: false } },
   });
   app.addHook("onClose", async () => library.close());
