@@ -173,6 +173,61 @@ test("opens a normal Game record and selects moves across the board and notation
   }
 });
 
+test("renders the annotation corpus on notation, warnings, and board graphics", async ({ page }) => {
+  const directory = mkdtempSync(join(tmpdir(), "offline-pgn-reader-browser-annotations-"));
+  const source = join(directory, "annotations.pgn");
+  writeFileSync(
+    source,
+    `${readFileSync(resolve("tests/fixtures/annotations.pgn"), "utf8")}\n${readFileSync(
+      resolve("tests/fixtures/graphics.pgn"),
+      "utf8",
+    )}`,
+  );
+
+  try {
+    await page.goto("/");
+    await page.locator("#path-input").fill(source);
+    await page.getByRole("button", { name: "Index path" }).click();
+    const card = page.locator(".file-card").filter({ hasText: "annotations.pgn" });
+    await expect(card).toContainText("2 games", { timeout: 10_000 });
+
+    await card.click();
+    await expect(page.locator(".games-table tbody tr")).toHaveCount(2, { timeout: 10_000 });
+    await page.locator(".games-table tbody tr").nth(0).dispatchEvent("click");
+    await expect(page.locator(".notation .cmt").filter({ hasText: "Pre-game introduction comment." }))
+      .toBeVisible();
+    await expect(page.locator(".notation .cmt").filter({ hasText: "semicolon comment" }))
+      .toBeVisible();
+    await expect(page.locator(".notation .mv").filter({ hasText: "e4" })).toContainText("!");
+    await expect(page.locator(".notation .mv").filter({ hasText: "e5" })).toContainText("?!");
+
+    await page.locator(".game-nav button").nth(1).click();
+    await expect(page.locator(".notation .cmt").filter({ hasText: "Intro with shapes." }))
+      .toBeVisible();
+    await expect(page.locator('.sq[data-square="d4"] .csl')).toHaveCount(1);
+    await expect(page.locator('.sq[data-square="e5"] .csl')).toHaveCount(1);
+    await expect(page.locator(".board-arrows line")).toHaveCount(1);
+
+    await page.locator(".notation .mv").filter({ hasText: "e4" }).click();
+    await expect(page.locator('.sq[data-square="e4"] .csl')).toHaveCount(1);
+    await expect(page.locator(".board-arrows line")).toHaveCount(2);
+
+    await page.locator(".notation .mv").filter({ hasText: "c5" }).click();
+    await expect(page.locator('.sq[data-square="c5"] .csl')).toHaveCount(1);
+    await page.keyboard.press("ArrowUp");
+    await expect(page.locator(".notation .mv.current")).toContainText("e5");
+    await page.keyboard.press("ArrowDown");
+    await expect(page.locator(".notation .mv.current")).toContainText("c5");
+
+    await page.locator(".notation .mv").filter({ hasText: "c3" }).click();
+    await expect(page.locator(".notation .cmt").filter({ hasText: "pre-move shapes" }))
+      .toBeVisible();
+    await expect(page.locator(".board-arrows line")).toHaveCount(1);
+  } finally {
+    rmSync(directory, { force: true, recursive: true });
+  }
+});
+
 test("navigates recursive variations and FEN-start positions in the reader", async ({ page }) => {
   const directory = mkdtempSync(join(tmpdir(), "offline-pgn-reader-browser-variations-"));
   const source = join(directory, "variations-and-fen.pgn");

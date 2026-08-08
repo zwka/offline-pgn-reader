@@ -206,4 +206,69 @@ describe("GameDocument hydration", () => {
       expect.stringContaining("invalid FEN header, using standard start"),
     ]);
   });
+
+  it("preserves comments, starting comments, NAGs, and warnings in node context", () => {
+    const document = hydrateGame(readFileSync(resolve("tests/fixtures/annotations.pgn")));
+
+    expect(document.nodes[document.rootId].comment).toContain("Pre-game introduction comment.");
+    const bySan = new Map(
+      document.nodes.filter((node) => node.san).map((node) => [node.san, node]),
+    );
+
+    expect(bySan.get("e4")).toMatchObject({
+      comment: "Best by test.",
+      nags: [1],
+      glyphs: ["!"],
+    });
+    expect(bySan.get("e5")).toMatchObject({ nags: [6, 13], glyphs: ["?!", "∞"] });
+    expect(bySan.get("Nf3")).toMatchObject({ nags: [1, 14], glyphs: ["!", "⩲"] });
+    expect(bySan.get("Nc6")?.comment).toContain("semicolon comment");
+    expect(bySan.get("a6")).toMatchObject({ nags: [2], glyphs: ["?"] });
+    expect(bySan.get("Ba4")).toMatchObject({ nags: [6], glyphs: ["?!"] });
+    expect(document.warnings).toEqual([]);
+  });
+
+  it("extracts graphics from root, move, and variation starting comments", () => {
+    const document = hydrateGame(readFileSync(resolve("tests/fixtures/graphics.pgn")));
+    const bySan = new Map(
+      document.nodes.filter((node) => node.san).map((node) => [node.san, node]),
+    );
+
+    expect(document.nodes[document.rootId]).toMatchObject({
+      comment: "Intro with shapes.",
+      arrows: [{ from: "d2", to: "d4", color: "green" }],
+      highlights: [
+        { square: "d4", color: "green" },
+        { square: "e5", color: "red" },
+      ],
+    });
+    expect(bySan.get("e4")).toMatchObject({
+      comment: "King's pawn.",
+      arrows: [
+        { from: "e2", to: "e4", color: "green" },
+        { from: "d7", to: "d5", color: "red" },
+      ],
+      highlights: [{ square: "e4", color: "yellow" }],
+    });
+    expect(bySan.get("c5")).toMatchObject({
+      comment: "",
+      highlights: [{ square: "c5", color: "blue" }],
+    });
+    expect(bySan.get("c3")).toMatchObject({
+      startingComment: "pre-move shapes",
+      arrows: [{ from: "g1", to: "f3", color: "yellow" }],
+    });
+    expect(document.warnings).toEqual([]);
+    expect(document.source).toContain("[%cal Ge2e4,Rd7d5]");
+  });
+
+  it("keeps the legal prefix and reports parser warnings for malformed movetext", () => {
+    const source = readFileSync(resolve("tests/fixtures/malformed_middle.pgn"));
+    const start = source.indexOf(Buffer.from('[Event "Broken"]'));
+    const end = source.indexOf(Buffer.from('[Event "Good Two"]'));
+    const document = hydrateGame(source.subarray(start, end));
+
+    expect(document.nodes.slice(1).map((node) => node.san)).toEqual(["e4", "e5"]);
+    expect(document.warnings.some((warning) => warning.includes("could not parse PGN tree"))).toBe(true);
+  });
 });

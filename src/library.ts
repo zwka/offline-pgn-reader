@@ -222,7 +222,8 @@ export class LibraryService {
     const source = this.readGameBytes(row);
     let hydrated: GameDocumentPayload;
     try {
-      hydrated = hydrateGame(source, storedHeaders(row.tag_json));
+      const extraWarnings = row.warning ? [`index warning: ${row.warning}`] : [];
+      hydrated = hydrateGame(source, storedHeaders(row.tag_json), extraWarnings);
     } catch (error) {
       if (error instanceof HydrationError) {
         throw new ServiceError(`game could not be parsed: ${error.message}`, 422);
@@ -257,7 +258,8 @@ export class LibraryService {
 
   startScan(fileId: number, force = false): boolean {
     const file = this.getFile(fileId);
-    if (this.activeScans.has(fileId)) return false;
+    const activeScan = this.activeScans.get(fileId);
+    if (activeScan && file.scan_status !== "ready") return false;
     if (file.scan_status === "scanning") return false;
 
     if (!force && file.scan_status === "ready") {
@@ -266,6 +268,15 @@ export class LibraryService {
       } catch {
         throw new ServiceError(`source file missing: ${file.path}`, 409);
       }
+    }
+
+    // The worker commits `ready` before its completion message reaches this
+    // thread. Retire that completed worker so an immediate forced re-scan is
+    // not mistaken for a duplicate request.
+    if (activeScan) {
+      activeScan.finished = true;
+      this.activeScans.delete(fileId);
+      this.progress.delete(fileId);
     }
 
     let bytesTotal: number;

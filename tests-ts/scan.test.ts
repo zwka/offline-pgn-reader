@@ -186,6 +186,15 @@ describe("normal PGN scanning", () => {
       expect.objectContaining({ idx_in_file: 4, event: "After headers", white: "Final game" }),
     ]);
 
+    const warningDocument = await server.inject({
+      method: "GET",
+      url: `/api/games/${page.json().games[0].id}`,
+    });
+    expect(warningDocument.statusCode).toBe(200);
+    expect(warningDocument.json().warnings).toContain(
+      "index warning: movetext with no tag section",
+    );
+
     const database = new Database(join(directory, "index.sqlite3"));
     try {
       const rows = database

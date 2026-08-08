@@ -316,6 +316,51 @@ describe("indexed Game list contract", () => {
     expect(fenDocument.nodes[1]).toMatchObject({ san: "Rf8+", uci: "f7f8", parentId: 0 });
   });
 
+  it("serves comments, NAGs, and graphics through the typed GameDocument wire", async () => {
+    const { server } = testServer();
+    servers.push(server);
+    const sourcePath = resolve("tests/fixtures/graphics.pgn");
+
+    const registered = await server.inject({
+      method: "POST",
+      url: "/api/files",
+      payload: { path: sourcePath },
+    });
+    const file = await waitForReady(server, registered.json().id);
+    const game = (await server.inject({
+      method: "GET",
+      url: `/api/files/${file.id}/games`,
+    })).json().games[0];
+
+    const response = await server.inject({ method: "GET", url: `/api/games/${game.id}` });
+    const document = response.json();
+    const bySan = new Map(
+      document.nodes.filter((node: { san: string | null }) => node.san)
+        .map((node: { san: string }) => [node.san, node]),
+    );
+
+    expect(response.statusCode).toBe(200);
+    expect(Value.Check(GameDocumentSchema, document)).toBe(true);
+    expect(document.nodes[document.rootId]).toMatchObject({
+      comment: "Intro with shapes.",
+      arrows: [{ from: "d2", to: "d4", color: "green" }],
+      highlights: [
+        { square: "d4", color: "green" },
+        { square: "e5", color: "red" },
+      ],
+    });
+    expect(bySan.get("e4")).toMatchObject({
+      comment: "King's pawn.",
+      arrows: [
+        { from: "e2", to: "e4", color: "green" },
+        { from: "d7", to: "d5", color: "red" },
+      ],
+      highlights: [{ square: "e4", color: "yellow" }],
+    });
+    expect(bySan.get("c5")).toMatchObject({ highlights: [{ square: "c5", color: "blue" }] });
+    expect(document.warnings).toEqual([]);
+  });
+
   it("rejects invalid list bounds instead of silently changing the request", async () => {
     const { server } = testServer();
     servers.push(server);

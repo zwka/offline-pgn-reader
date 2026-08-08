@@ -16,12 +16,96 @@ export class HydrationError extends Error {
 
 type ParsedNode = {
   move?: string;
+  suffix?: string[];
+  nag?: string[];
+  comment?: string;
   variations: ParsedNode[];
 };
 
 type ParsedGame = {
   root: ParsedNode;
 };
+
+type Arrow = {
+  from: string;
+  to: string;
+  color: string;
+};
+
+type Highlight = {
+  square: string;
+  color: string;
+};
+
+type Annotations = {
+  comment: string;
+  arrows: Arrow[];
+  highlights: Highlight[];
+};
+
+type TraversalFrame = {
+  parsed: ParsedNode;
+  documentId: number;
+  nextChild: number;
+  undoOnExit: boolean;
+  startingComment: string;
+};
+
+const SUFFIX_NAGS: Record<string, number> = {
+  "!": 1,
+  "?": 2,
+  "!!": 3,
+  "??": 4,
+  "!?": 5,
+  "?!": 6,
+};
+
+const NAG_GLYPHS: Record<number, string> = {
+  1: "!",
+  2: "?",
+  3: "!!",
+  4: "??",
+  5: "!?",
+  6: "?!",
+  7: "□",
+  10: "=",
+  11: "=",
+  12: "=",
+  13: "∞",
+  14: "⩲",
+  15: "⩱",
+  16: "±",
+  17: "∓",
+  18: "+−",
+  19: "−+",
+  22: "⨀",
+  23: "⨀",
+  32: "⟳",
+  33: "⟳",
+  36: "↑",
+  37: "↑",
+  40: "→",
+  41: "→",
+  44: "=∞",
+  45: "=∞",
+  132: "⇆",
+  133: "⇆",
+  138: "⨁",
+  139: "⨁",
+  140: "∆",
+  142: "⌓",
+  146: "N",
+};
+
+const SHAPE_COLORS: Record<string, string> = {
+  G: "green",
+  R: "red",
+  Y: "yellow",
+  B: "blue",
+};
+
+const SHAPE_RE = /(\s?)\[%(?:csl|cal)\s([RGYB][a-h][1-8](?:[a-h][1-8])?(?:,[RGYB][a-h][1-8](?:[a-h][1-8])?)*)\](\s?)/g;
+const TAG_LINE_RE = /^[ \t]*\[[ \t]*[A-Za-z][A-Za-z0-9_]*[ \t]+"(?:[^"\\]|\\.)*"[ \t]*\][ \t]*\r?$/;
 
 /**
  * Hydrate one indexed PGN span into the flat document tree used on the wire.
@@ -36,18 +120,19 @@ type ParsedGame = {
 export function hydrateGame(
   sourceBytes: Uint8Array,
   storedHeaders?: TagPair[],
+  extraWarnings: string[] = [],
 ): GameDocumentPayload {
   const source = Buffer.from(sourceBytes).toString("utf8");
   const parseSource = source.startsWith("\ufeff") ? source.slice(1) : source;
   const headers = storedHeaders?.length ? copyHeaders(storedHeaders) : parseHeaders(parseSource);
   if (!source.trim()) throw new HydrationError("no PGN game found in source span");
 
-  const warnings: string[] = [];
+  const warnings = [...extraWarnings];
   const board = startingBoard(headers, warnings);
   const nodes: GameNode[] = [rootNode(board)];
   let parsed: ParsedGame;
   try {
-    parsed = parse(removeEscapeLines(parseSource)) as ParsedGame;
+    parsed = parse(normalizeCommentsForParser(removeEscapeLines(parseSource))) as ParsedGame;
   } catch (error) {
     warnings.push(
       `could not parse PGN tree: ${error instanceof Error ? error.message : String(error)}`,
@@ -56,6 +141,7 @@ export function hydrateGame(
     return documentPayload(headers, nodes, warnings, source);
   }
 
+  applyAnnotations(nodes[0], extractAnnotations(parsed.root.comment ?? ""));
   hydrateTree(board, nodes, parsed.root, warnings);
   return documentPayload(headers, nodes, warnings, source);
 }
@@ -91,13 +177,6 @@ function startingBoard(headers: TagPair[], warnings: string[]): Chess {
   return new Chess();
 }
 
-type TraversalFrame = {
-  parsed: ParsedNode;
-  documentId: number;
-  nextChild: number;
-  undoOnExit: boolean;
-};
-
 function hydrateTree(
   board: Chess,
   nodes: GameNode[],
@@ -105,7 +184,13 @@ function hydrateTree(
   warnings: string[],
 ): void {
   const stack: TraversalFrame[] = [
-    { parsed: parsedRoot, documentId: 0, nextChild: 0, undoOnExit: false },
+    {
+      parsed: parsedRoot,
+      documentId: 0,
+      nextChild: 0,
+      undoOnExit: false,
+      startingComment: "",
+    },
   ];
 
   while (stack.length) {
@@ -125,13 +210,28 @@ function hydrateTree(
         documentId: frame.documentId,
         nextChild: 0,
         undoOnExit: false,
+        startingComment: joinComments(frame.startingComment, child.comment),
       });
       continue;
     }
 
-    const node = appendMove(board, nodes, frame.documentId, child.move, warnings);
+    const node = appendMove(
+      board,
+      nodes,
+      frame.documentId,
+      child.move,
+      warnings,
+      child,
+      frame.startingComment,
+    );
     if (!node) continue;
-    stack.push({ parsed: child, documentId: node.id, nextChild: 0, undoOnExit: true });
+    stack.push({
+      parsed: child,
+      documentId: node.id,
+      nextChild: 0,
+      undoOnExit: true,
+      startingComment: "",
+    });
   }
 }
 
@@ -141,6 +241,8 @@ function appendMove(
   parentId: number,
   token: string,
   warnings: string[],
+  parsed?: ParsedNode,
+  startingComment = "",
 ): GameNode | null {
   const color = board.turn();
   const moveNumber = board.moveNumber();
@@ -155,6 +257,9 @@ function appendMove(
   }
 
   const id = nodes.length;
+  const annotations = extractAnnotations(parsed?.comment ?? "");
+  const startingAnnotations = extractAnnotations(startingComment);
+  const nags = parsed ? parsedNags(parsed) : [];
   const node: GameNode = {
     id,
     parentId,
@@ -164,17 +269,130 @@ function appendMove(
     moveNumber,
     color,
     fen: board.fen(),
-    nags: [],
-    glyphs: [],
-    comment: "",
-    startingComment: "",
+    nags,
+    glyphs: nags.map((nag) => NAG_GLYPHS[nag] ?? `$${nag}`),
+    comment: annotations.comment,
+    startingComment: startingAnnotations.comment,
     children: [],
-    arrows: [],
-    highlights: [],
+    arrows: [...annotations.arrows, ...startingAnnotations.arrows],
+    highlights: [...annotations.highlights, ...startingAnnotations.highlights],
   };
   nodes[parentId].children.push(id);
   nodes.push(node);
   return node;
+}
+
+function applyAnnotations(node: GameNode, annotations: Annotations): void {
+  node.comment = annotations.comment;
+  node.arrows = annotations.arrows;
+  node.highlights = annotations.highlights;
+}
+
+function parsedNags(parsed: ParsedNode): number[] {
+  const numeric = (parsed.nag ?? [])
+    .map((nag) => Number(nag))
+    .filter((nag) => Number.isInteger(nag));
+  const suffix = SUFFIX_NAGS[(parsed.suffix ?? []).join("")];
+  if (suffix !== undefined) numeric.push(suffix);
+  return numeric.sort((left, right) => left - right);
+}
+
+function extractAnnotations(comment: string): Annotations {
+  const arrows: Arrow[] = [];
+  const highlights: Highlight[] = [];
+  const cleaned = comment.replace(
+    SHAPE_RE,
+    (_match: string, prefix: string, specs: string, suffix: string) => {
+      for (const spec of specs.split(",")) {
+        const color = SHAPE_COLORS[spec[0]];
+        const from = spec.slice(1, 3);
+        const to = spec.slice(3, 5);
+        if (to.length === 2) {
+          arrows.push({ from, to, color });
+        } else {
+          highlights.push({ square: from, color });
+        }
+      }
+      return prefix || suffix ? " " : "";
+    },
+  ).trim();
+  return { comment: cleaned, arrows, highlights };
+}
+
+function joinComments(first: string, second: string | undefined): string {
+  if (!second) return first;
+  return first ? `${first} ${second}` : second;
+}
+
+/**
+ * chess.js accepts one comment at each parser position. PGN exports commonly
+ * put adjacent comments before a variation move, so fold adjacent brace and
+ * semicolon comments into one parser comment without changing the source sent
+ * back to the client.
+ */
+function normalizeCommentsForParser(source: string): string {
+  let result = "";
+  let index = 0;
+
+  while (index < source.length) {
+    if (index === 0 || source[index - 1] === "\n") {
+      const newline = source.indexOf("\n", index);
+      const lineEnd = newline === -1 ? source.length : newline;
+      const line = source.slice(index, lineEnd).replace(/\r$/, "");
+      if (TAG_LINE_RE.test(line) || line.trimStart().startsWith("%")) {
+        result += source.slice(index, lineEnd);
+        index = lineEnd;
+        continue;
+      }
+    }
+
+    const marker = source[index];
+    if (marker !== "{" && marker !== ";") {
+      result += marker;
+      index += 1;
+      continue;
+    }
+
+    const comments: string[] = [];
+    let cursor = index;
+    while (cursor < source.length) {
+      if (source[cursor] === "{") {
+        const end = source.indexOf("}", cursor + 1);
+        if (end === -1) {
+          result += source.slice(index);
+          return result;
+        }
+        comments.push(source.slice(cursor + 1, end));
+        cursor = end + 1;
+      } else if (source[cursor] === ";") {
+        const newline = source.indexOf("\n", cursor + 1);
+        const end = newline === -1 ? source.length : newline;
+        comments.push(
+          source
+            .slice(cursor + 1, end)
+            .replace(/\r$/, "")
+            .replaceAll("{", "(")
+            .replaceAll("}", ")")
+            .trim(),
+        );
+        cursor = end;
+      } else {
+        break;
+      }
+
+      const whitespaceStart = cursor;
+      while (cursor < source.length && /\s/.test(source[cursor])) cursor += 1;
+      if (source[cursor] !== "{" && source[cursor] !== ";") {
+        cursor = whitespaceStart;
+        break;
+      }
+    }
+
+    result += `{${comments.join(" ")}}`;
+    index = cursor;
+  }
+
+  return result;
 }
 
 function hydrateMainLine(
