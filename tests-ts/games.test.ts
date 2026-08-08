@@ -7,7 +7,7 @@ import { Value } from "@sinclair/typebox/value";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { buildServer } from "../src/server.js";
-import { GamePageSchema } from "../src/wire.js";
+import { GameDocumentSchema, GamePageSchema } from "../src/wire.js";
 
 const servers = [] as ReturnType<typeof buildServer>[];
 const testDirectories: string[] = [];
@@ -188,6 +188,84 @@ describe("indexed Game list contract", () => {
     });
     expect(empty.statusCode).toBe(200);
     expect(empty.json()).toEqual({ total: 0, offset: 0, limit: 100, games: [] });
+  });
+
+  it("opens a normal GameDocument with main-line nodes and file neighbors", async () => {
+    const { directory, server } = testServer();
+    servers.push(server);
+    const sourcePath = join(directory, "reader.pgn");
+    writeFileSync(
+      sourcePath,
+      [
+        '[Event "Reader Match"]',
+        '[Site "Local"]',
+        '[Date "2024.01.01"]',
+        '[Round "1"]',
+        '[White "White One"]',
+        '[Black "Black One"]',
+        '[Result "1-0"]',
+        "",
+        "1. e4 e5 2. Nf3 Nc6 3. Bc4 1-0",
+        "",
+        '[Event "Neighbor"]',
+        '[Result "*"]',
+        "",
+        "1. d4 *",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const registered = await server.inject({
+      method: "POST",
+      url: "/api/files",
+      payload: { path: sourcePath },
+    });
+    const file = await waitForReady(server, registered.json().id);
+    const games = (await server.inject({
+      method: "GET",
+      url: `/api/files/${file.id}/games`,
+    })).json().games;
+
+    const response = await server.inject({
+      method: "GET",
+      url: `/api/games/${games[0].id}`,
+    });
+    const body = response.json();
+
+    expect(response.statusCode).toBe(200);
+    expect(Value.Check(GameDocumentSchema, body)).toBe(true);
+    expect(body).toMatchObject({
+      gameId: games[0].id,
+      fileId: file.id,
+      fileName: "reader.pgn",
+      idxInFile: 0,
+      rootId: 0,
+      result: "1-0",
+      neighbors: { prev: null, next: games[1].id },
+    });
+    expect(body.headers).toEqual([
+      ["Event", "Reader Match"],
+      ["Site", "Local"],
+      ["Date", "2024.01.01"],
+      ["Round", "1"],
+      ["White", "White One"],
+      ["Black", "Black One"],
+      ["Result", "1-0"],
+    ]);
+    expect(body.nodes[0]).toMatchObject({
+      id: 0,
+      parentId: null,
+      san: null,
+      uci: null,
+      children: [1],
+    });
+    expect(body.nodes.slice(1).map((node: { san: string }) => node.san)).toEqual([
+      "e4",
+      "e5",
+      "Nf3",
+      "Nc6",
+      "Bc4",
+    ]);
   });
 
   it("rejects invalid list bounds instead of silently changing the request", async () => {

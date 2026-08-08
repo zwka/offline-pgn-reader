@@ -90,6 +90,72 @@ export const GamePageSchema = Type.Object(
 
 export type GamePage = Static<typeof GamePageSchema>;
 
+export const GameNodeSchema = Type.Object(
+  {
+    id: Type.Integer({ minimum: 0 }),
+    parentId: Type.Union([Type.Integer({ minimum: 0 }), Type.Null()]),
+    san: Type.Union([Type.String(), Type.Null()]),
+    uci: Type.Union([Type.String(), Type.Null()]),
+    ply: Type.Integer({ minimum: 0 }),
+    moveNumber: Type.Integer({ minimum: 1 }),
+    color: Type.Union([Type.Literal(""), Type.Literal("w"), Type.Literal("b")]),
+    fen: Type.String(),
+    nags: Type.Array(Type.Integer({ minimum: 0 })),
+    glyphs: Type.Array(Type.String()),
+    comment: Type.String(),
+    startingComment: Type.String(),
+    children: Type.Array(Type.Integer({ minimum: 0 })),
+    arrows: Type.Array(
+      Type.Object(
+        {
+          from: Type.String(),
+          to: Type.String(),
+          color: Type.String(),
+        },
+        { additionalProperties: false },
+      ),
+    ),
+    highlights: Type.Array(
+      Type.Object(
+        {
+          square: Type.String(),
+          color: Type.String(),
+        },
+        { additionalProperties: false },
+      ),
+    ),
+  },
+  { additionalProperties: false },
+);
+
+export type GameNode = Static<typeof GameNodeSchema>;
+
+export const GameDocumentSchema = Type.Object(
+  {
+    gameId: Type.Integer({ minimum: 1 }),
+    fileId: Type.Integer({ minimum: 1 }),
+    fileName: Type.String(),
+    idxInFile: Type.Integer({ minimum: 0 }),
+    headers: Type.Array(Type.Tuple([Type.String(), Type.String()])),
+    rootId: Type.Integer({ minimum: 0 }),
+    nodes: Type.Array(GameNodeSchema),
+    result: Type.String(),
+    warnings: Type.Array(Type.String()),
+    source: Type.String(),
+    neighbors: Type.Object(
+      {
+        prev: Type.Union([Type.Integer({ minimum: 1 }), Type.Null()]),
+        next: Type.Union([Type.Integer({ minimum: 1 }), Type.Null()]),
+      },
+      { additionalProperties: false },
+    ),
+  },
+  { additionalProperties: false },
+);
+
+export type GameDocument = Static<typeof GameDocumentSchema>;
+export type GameDocumentPayload = Omit<GameDocument, "gameId" | "fileId" | "fileName" | "idxInFile" | "neighbors">;
+
 export const DiscoveredSourceSchema = Type.Object(
   {
     path: Type.String(),

@@ -11,6 +11,7 @@ import {
   DiscoveredSourceSchema,
   ErrorResponseSchema,
   FileRecordSchema,
+  GameDocumentSchema,
   GamePageSchema,
   HealthResponseSchema,
   RegisterFileRequestSchema,
@@ -164,6 +165,20 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
       Number(request.query.offset ?? 0),
       Number(request.query.limit ?? 100),
     ),
+  );
+
+  app.get<{ Params: { gameId: string } }>(
+    "/api/games/:gameId",
+    {
+      schema: {
+        params: Type.Object({ gameId: Type.String({ pattern: "^[1-9][0-9]*$" }) }),
+        response: { 200: GameDocumentSchema },
+      },
+    },
+    async (request) => ({
+      ...library.getGameDocument(Number(request.params.gameId)),
+      neighbors: library.neighborGameIds(Number(request.params.gameId)),
+    }),
   );
 
   app.setNotFoundHandler(async (_request, reply) =>

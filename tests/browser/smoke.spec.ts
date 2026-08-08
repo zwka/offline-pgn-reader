@@ -130,6 +130,48 @@ test("opens a source and browses paginated, searchable Game records", async ({ p
   }
 });
 
+test("opens a normal Game record and selects moves across the board and notation", async ({ page }) => {
+  const directory = mkdtempSync(join(tmpdir(), "offline-pgn-reader-browser-reader-"));
+  const source = join(directory, "reader.pgn");
+  writeFileSync(
+    source,
+    [
+      '[Event "Browser reader"]',
+      '[White "White One"]',
+      '[Black "Black One"]',
+      '[Result "1-0"]',
+      "",
+      "1. e4 e5 2. Nf3 Nc6 1-0",
+    ].join("\n"),
+  );
+
+  try {
+    await page.goto("/");
+    await page.locator("#path-input").fill(source);
+    await page.getByRole("button", { name: "Index path" }).click();
+    const card = page.locator(".file-card").filter({ hasText: "reader.pgn" });
+    await expect(card).toContainText("1 games", { timeout: 10_000 });
+
+    await card.click();
+    await expect(page.locator(".games-table tbody tr")).toHaveCount(1, { timeout: 10_000 });
+    await page.locator(".games-table tbody tr").dispatchEvent("click");
+    await expect(page.locator(".reader-title")).toContainText("White One");
+    await expect(page.locator(".notation .mv")).toHaveCount(4);
+    await expect(page.locator('.sq[data-square="e2"] .piece')).toHaveCount(1);
+
+    await page.locator(".notation .mv").filter({ hasText: "e4" }).click();
+    await expect(page.locator(".notation .mv.current")).toContainText("e4");
+    await expect(page.locator('.sq[data-square="e4"] .piece')).toHaveAttribute("alt", "P");
+    await expect(page.locator('.sq[data-square="e2"] .piece')).toHaveCount(0);
+
+    await page.locator(".notation .mv").filter({ hasText: "e5" }).click();
+    await expect(page.locator(".notation .mv.current")).toContainText("e5");
+    await expect(page.locator('.sq[data-square="e5"] .piece')).toHaveAttribute("alt", "p");
+  } finally {
+    rmSync(directory, { force: true, recursive: true });
+  }
+});
+
 test("shows a changed source as stale and rescans it from the Library", async ({ page }) => {
   const directory = mkdtempSync(join(tmpdir(), "offline-pgn-reader-browser-stale-"));
   const source = join(directory, "changed.pgn");

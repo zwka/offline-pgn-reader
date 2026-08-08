@@ -15,8 +15,17 @@ import { basename, extname, isAbsolute, join, resolve } from "node:path";
 import { homedir } from "node:os";
 
 import { LibraryDatabase } from "./database.js";
-import { fingerprintFile } from "./scanner.js";
-import type { DiscoveredSource, FileRecord, GamePage } from "./wire.js";
+import { fingerprintFile, readGameBytes as readGameSpan, type TagPair } from "./scanner.js";
+import { hydrateGame, HydrationError } from "./hydration.js";
+import type {
+  DiscoveredSource,
+  FileRecord,
+  GameDocument,
+  GameDocumentPayload,
+  GamePage,
+} from "./wire.js";
+
+const MAX_GAME_BYTES = 8 * 1024 * 1024;
 
 type FileRow = {
   id: number;
@@ -47,6 +56,17 @@ type GameRecordRow = {
   has_fen: number;
   warning: string | null;
   byte_size: number;
+};
+
+type GameDocumentRow = GameRecordRow & {
+  file_id: number;
+  offset_start: number;
+  offset_end: number;
+  tag_json: string;
+  file_path: string;
+  file_name: string;
+  file_scan_status: "pending" | "scanning" | "ready" | "error";
+  file_fingerprint: string;
 };
 
 type ScanProgressState = {
@@ -194,6 +214,44 @@ export class LibraryService {
         limit: normalizedLimit,
         games,
       };
+    });
+  }
+
+  getGameDocument(gameId: number): Omit<GameDocument, "neighbors"> {
+    const row = this.gameRowById(gameId);
+    const source = this.readGameBytes(row);
+    let hydrated: GameDocumentPayload;
+    try {
+      hydrated = hydrateGame(source, storedHeaders(row.tag_json));
+    } catch (error) {
+      if (error instanceof HydrationError) {
+        throw new ServiceError(`game could not be parsed: ${error.message}`, 422);
+      }
+      throw error;
+    }
+    return {
+      ...hydrated,
+      gameId,
+      fileId: row.file_id,
+      fileName: row.file_name,
+      idxInFile: row.idx_in_file,
+    };
+  }
+
+  neighborGameIds(gameId: number): { prev: number | null; next: number | null } {
+    const row = this.gameRowById(gameId);
+    return this.database.withConnection((database) => {
+      const prev = database
+        .prepare(
+          "SELECT id FROM games WHERE file_id=? AND idx_in_file<? ORDER BY idx_in_file DESC LIMIT 1",
+        )
+        .get(row.file_id, row.idx_in_file) as { id: number } | undefined;
+      const next = database
+        .prepare(
+          "SELECT id FROM games WHERE file_id=? AND idx_in_file>? ORDER BY idx_in_file LIMIT 1",
+        )
+        .get(row.file_id, row.idx_in_file) as { id: number } | undefined;
+      return { prev: prev?.id ?? null, next: next?.id ?? null };
     });
   }
 
@@ -362,6 +420,54 @@ export class LibraryService {
     };
   }
 
+  private gameRowById(gameId: number): GameDocumentRow {
+    const row = this.database.withConnection((database) =>
+      database
+        .prepare(
+          `SELECT g.*, f.path AS file_path, f.name AS file_name,
+             f.scan_status AS file_scan_status, f.fingerprint AS file_fingerprint
+           FROM games g JOIN files f ON f.id = g.file_id WHERE g.id=?`,
+        )
+        .get(gameId) as GameDocumentRow | undefined,
+    );
+    if (!row) throw new NotFound(`game ${gameId} not found`);
+    return row;
+  }
+
+  private readGameBytes(row: GameDocumentRow): Buffer {
+    if (row.file_scan_status !== "ready") {
+      throw new ServiceError(
+        `source index is not ready for reads: ${row.file_scan_status}`,
+        409,
+      );
+    }
+    try {
+      if (!statSync(row.file_path).isFile()) throw new Error("not a file");
+      if (fingerprintFile(row.file_path) !== row.file_fingerprint) {
+        throw new ServiceError(`source changed since scan: ${row.file_path}`, 409);
+      }
+    } catch (error) {
+      if (error instanceof ServiceError) throw error;
+      throw new ServiceError(`source file missing: ${row.file_path}`, 409);
+    }
+
+    const data = readGameSpan(
+      row.file_path,
+      row.offset_start,
+      row.offset_end,
+      MAX_GAME_BYTES,
+    );
+    try {
+      if (fingerprintFile(row.file_path) !== row.file_fingerprint) {
+        throw new ServiceError(`source changed since scan: ${row.file_path}`, 409);
+      }
+    } catch (error) {
+      if (error instanceof ServiceError) throw error;
+      throw new ServiceError(`source file missing: ${row.file_path}`, 409);
+    }
+    return data;
+  }
+
   private setScanError(fileId: number, error: unknown): void {
     const message = error instanceof Error ? error.message : String(error);
     this.database.withConnection((database) => {
@@ -369,6 +475,21 @@ export class LibraryService {
         .prepare("UPDATE files SET scan_status='error', scan_error=? WHERE id=?")
         .run(message, fileId);
     });
+  }
+}
+
+function storedHeaders(raw: string): TagPair[] | undefined {
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return undefined;
+    const headers = parsed.filter(
+      (pair): pair is [string, string] =>
+        Array.isArray(pair) && pair.length === 2 &&
+        typeof pair[0] === "string" && typeof pair[1] === "string",
+    );
+    return headers.length === parsed.length ? headers : undefined;
+  } catch {
+    return undefined;
   }
 }
 

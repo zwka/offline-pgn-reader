@@ -72,8 +72,23 @@ def test_game_document_and_neighbors(client, fixture_copy):
     f = register(client, fixture_copy("basic_two_games.pgn"))
     games = client.get(f"/api/files/{f['id']}/games").json()["games"]
     doc = client.get(f"/api/games/{games[0]['id']}").json()
+    assert doc["rootId"] == 0
+    assert doc["headers"][:3] == [
+        ["Event", "Test Open"],
+        ["Site", "Localville"],
+        ["Date", "2024.01.15"],
+    ]
+    assert doc["nodes"][0]["children"] == [1]
     assert doc["nodes"][1]["san"] == "e4"
+    assert doc["nodes"][1]["uci"] == "e2e4"
+    assert doc["nodes"][1]["fen"] == (
+        "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1"
+    )
+    assert doc["nodes"][1]["moveNumber"] == 1
+    assert doc["nodes"][1]["color"] == "w"
+    assert doc["nodes"][-1]["children"] == []
     assert doc["neighbors"]["next"] == games[1]["id"]
+    assert doc["neighbors"]["prev"] is None
     assert doc["result"] == "1-0"
     assert doc["fileName"].endswith(".pgn")
 
