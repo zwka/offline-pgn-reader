@@ -29,6 +29,37 @@ function testIndex(): { directory: string; sourcePath: string; index: Index } {
 }
 
 describe("Index persistence interface", () => {
+  it("rejects a source that changes during scan without replacing its prior games", async () => {
+    const { sourcePath, index } = testIndex();
+    const source = index.registerFile(sourcePath, "source.pgn");
+
+    expect(index.claimScan(source.id)).toBe(true);
+    await index.replaceGames(source.id, sourcePath);
+    const before = index.listGames(source.id);
+
+    writeFileSync(
+      sourcePath,
+      '[Event "Large"]\n\n1. ' + "e4 ".repeat(1_400_000) + "*\n",
+      "utf8",
+    );
+    expect(index.claimScan(source.id)).toBe(true);
+    let changed = false;
+
+    await expect(index.replaceGames(source.id, sourcePath, (bytesDone) => {
+      if (bytesDone > 0 && !changed) {
+        changed = true;
+        writeFileSync(sourcePath, Buffer.concat([readFileSync(sourcePath), Buffer.from("\n")]));
+      }
+    })).rejects.toThrow("source changed during scan");
+
+    expect(changed).toBe(true);
+    expect(index.listGames(source.id)).toEqual(before);
+    expect(index.getFile(source.id)).toMatchObject({
+      scan_status: "error",
+      scan_error: "source changed during scan",
+    });
+  });
+
   it("replaces source games, preserves ordered tags, and resets the schema", async () => {
     const { directory, sourcePath, index } = testIndex();
     const source = index.registerFile(sourcePath, "source.pgn");

@@ -15,8 +15,16 @@ import { basename, extname, isAbsolute, join, resolve } from "node:path";
 import { homedir } from "node:os";
 
 import { IndexBusyError, type Index, type IndexFile, type IndexGame } from "./index.js";
-import { fingerprintFile, readGameBytes as readGameSpan, type TagPair } from "./scanner.js";
 import { hydrateGame, HydrationError } from "./hydration.js";
+import {
+  readSourceSpan,
+  sourceFingerprint,
+  sourceStats,
+  SourceChangedError,
+  SourceMissingError,
+  SourceSpanError,
+} from "./source.js";
+import type { TagPair } from "./scanner.js";
 import type {
   DiscoveredSource,
   FileRecord,
@@ -190,7 +198,7 @@ export class LibraryService {
 
     if (!force && file.scan_status === "ready") {
       try {
-        if (fingerprintFile(file.path) === file.fingerprint) return file;
+        if (sourceFingerprint(file.path) === file.fingerprint) return file;
       } catch {
         throw new ServiceError(`source file missing: ${file.path}`, 409);
       }
@@ -204,7 +212,7 @@ export class LibraryService {
 
     let bytesTotal: number;
     try {
-      bytesTotal = statSync(file.path).size;
+      bytesTotal = sourceStats(file.path).size;
     } catch {
       throw new ServiceError(`source file missing: ${file.path}`, 409);
     }
@@ -240,7 +248,7 @@ export class LibraryService {
 
     if (!force && file.scan_status === "ready") {
       try {
-        if (fingerprintFile(file.path) === file.fingerprint) return false;
+        if (sourceFingerprint(file.path) === file.fingerprint) return false;
       } catch {
         throw new ServiceError(`source file missing: ${file.path}`, 409);
       }
@@ -257,7 +265,7 @@ export class LibraryService {
 
     let bytesTotal: number;
     try {
-      bytesTotal = statSync(file.path).size;
+      bytesTotal = sourceStats(file.path).size;
     } catch {
       throw new ServiceError(`source file missing: ${file.path}`, 409);
     }
@@ -358,18 +366,10 @@ export class LibraryService {
     let exists = false;
     let stale = false;
     try {
-      const stats = statSync(source.path, { bigint: true });
-      exists = stats.isFile();
-      if (exists && source.scan_status === "ready") {
-        stale = Number(stats.size) !== source.size ||
-          fileMtimeNs(stats.mtimeNs) !== source.mtime_ns;
-        if (!stale) {
-          try {
-            stale = fingerprintFile(source.path) !== source.fingerprint;
-          } catch {
-            stale = true;
-          }
-        }
+      sourceStats(source.path);
+      exists = true;
+      if (source.fingerprint) {
+        stale = sourceFingerprint(source.path) !== source.fingerprint;
       }
     } catch {
       // A registered source can disappear after registration; keep its record readable.
@@ -408,30 +408,20 @@ export class LibraryService {
       );
     }
     try {
-      if (!statSync(row.file_path).isFile()) throw new Error("not a file");
-      if (fingerprintFile(row.file_path) !== row.file_fingerprint) {
-        throw new ServiceError(`source changed since scan: ${row.file_path}`, 409);
-      }
+      return readSourceSpan(
+        row.file_path,
+        row.offset_start,
+        row.offset_end,
+        this.maxGameBytes,
+        row.file_fingerprint,
+      );
     } catch (error) {
-      if (error instanceof ServiceError) throw error;
-      throw new ServiceError(`source file missing: ${row.file_path}`, 409);
-    }
-
-    const data = readGameSpan(
-      row.file_path,
-      row.offset_start,
-      row.offset_end,
-      this.maxGameBytes,
-    );
-    try {
-      if (fingerprintFile(row.file_path) !== row.file_fingerprint) {
-        throw new ServiceError(`source changed since scan: ${row.file_path}`, 409);
+      if (error instanceof SourceMissingError || error instanceof SourceChangedError) {
+        throw new ServiceError(error.message, 409);
       }
-    } catch (error) {
-      if (error instanceof ServiceError) throw error;
-      throw new ServiceError(`source file missing: ${row.file_path}`, 409);
+      if (error instanceof SourceSpanError) throw new ServiceError(error.message, 422);
+      throw error;
     }
-    return data;
   }
 
   private setScanError(fileId: number, error: unknown): void {
@@ -526,10 +516,6 @@ function pgnFiles(directory: string): string[] {
     }
   }
   return candidates.sort();
-}
-
-function fileMtimeNs(mtimeNs: bigint): number {
-  return Number(mtimeNs);
 }
 
 function workerExecArgv(): string[] {

@@ -1,11 +1,11 @@
-import {
-  createReadStream,
-  openSync,
-  readSync,
-  closeSync,
-  statSync,
-} from "node:fs";
-import { createHash } from "node:crypto";
+import { createReadStream } from "node:fs";
+
+import { sourceStats } from "./source.js";
+
+export {
+  readSourceSpan as readGameBytes,
+  sourceFingerprint as fingerprintFile,
+} from "./source.js";
 
 const BOM = Buffer.from([0xef, 0xbb, 0xbf]);
 const DEFAULT_PROGRESS_BYTES = 4 * 1024 * 1024;
@@ -29,7 +29,7 @@ export async function* scanPgn(
   progress?: ScanProgress,
   progressEveryBytes = DEFAULT_PROGRESS_BYTES,
 ): AsyncGenerator<ScannedGame> {
-  const size = statSync(path).size;
+  const size = sourceStats(path).size;
   let offset = 0;
   let nextProgress = progressEveryBytes;
   let current: ScannedGame | null = null;
@@ -221,47 +221,6 @@ export async function* scanPgn(
   progress?.(size, size, gamesFound);
 }
 
-export function readGameBytes(
-  path: string,
-  offsetStart: number,
-  offsetEnd: number,
-  maxBytes: number,
-): Buffer {
-  const length = offsetEnd - offsetStart;
-  if (length < 0 || length > maxBytes) {
-    throw new Error(`invalid game span: ${offsetStart}..${offsetEnd} (max ${maxBytes})`);
-  }
-  const descriptor = openSync(path, "r");
-  try {
-    const data = Buffer.alloc(length);
-    let bytesRead = 0;
-    while (bytesRead < length) {
-      const count = readSync(descriptor, data, bytesRead, length - bytesRead, offsetStart + bytesRead);
-      if (count === 0) break;
-      bytesRead += count;
-    }
-    return bytesRead === length ? data : data.subarray(0, bytesRead);
-  } finally {
-    closeSync(descriptor);
-  }
-}
-
-export function fingerprintFile(path: string, sampleBytes = 64 * 1024): string {
-  const stats = statSync(path, { bigint: true });
-  const hash = createHash("sha1");
-  hash.update(`${stats.size}:${stats.mtimeNs}:`);
-  const descriptor = openSync(path, "r");
-  try {
-    hash.update(readAtMost(descriptor, sampleBytes, 0));
-    if (stats.size > BigInt(sampleBytes * 2)) {
-      hash.update(readAtMost(descriptor, sampleBytes, Number(stats.size) - sampleBytes));
-    }
-  } finally {
-    closeSync(descriptor);
-  }
-  return hash.digest("hex");
-}
-
 function parseTag(text: string): TagPair | null {
   const match = /^\s*\[\s*([A-Za-z][A-Za-z0-9_]*)\s+"((?:[^"\\]|\\.)*)"\s*\]\s*$/.exec(text);
   if (!match) return null;
@@ -284,10 +243,4 @@ function trailingNewlineLength(previousByte: number, lastByte: number): number {
     return 1;
   }
   return 0;
-}
-
-function readAtMost(descriptor: number, length: number, position: number): Buffer {
-  const buffer = Buffer.alloc(length);
-  const bytesRead = readSync(descriptor, buffer, 0, length, position);
-  return bytesRead === length ? buffer : buffer.subarray(0, bytesRead);
 }

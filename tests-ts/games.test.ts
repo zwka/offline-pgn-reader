@@ -87,6 +87,37 @@ function browseSource(): string {
 }
 
 describe("indexed Game list contract", () => {
+  it("refuses oversized source spans with a clear read error", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "offline-pgn-reader-ts-games-span-"));
+    testDirectories.push(directory);
+    const server = buildServer({
+      dbPath: join(directory, "index.sqlite3"),
+      watchDirs: [],
+      uploadDir: join(directory, "library"),
+      maxGameBytes: 4,
+    });
+    servers.push(server);
+    const sourcePath = join(directory, "oversized.pgn");
+    writeFileSync(sourcePath, '[Event "Bounds"]\n\n1. e4 *\n', "utf8");
+
+    const registered = await server.inject({
+      method: "POST",
+      url: "/api/files",
+      payload: { path: sourcePath },
+    });
+    const file = await waitForReady(server, registered.json().id);
+    const game = (await server.inject({
+      method: "GET",
+      url: `/api/files/${file.id}/games`,
+    })).json().games[0];
+
+    for (const url of [`/api/games/${game.id}/pgn`, `/api/games/${game.id}`]) {
+      const response = await server.inject({ method: "GET", url });
+      expect(response.statusCode).toBe(422);
+      expect(response.json()).toEqual({ detail: expect.stringContaining("invalid game span") });
+    }
+  });
+
   it("returns ordered, paged, searchable records with the agreed wire shape", async () => {
     const { directory, server } = testServer();
     servers.push(server);
@@ -374,6 +405,36 @@ describe("indexed Game list contract", () => {
     })).json();
     expect(Value.Check(GameDocumentSchema, document)).toBe(true);
     expect(document.headers).toEqual(tags);
+  });
+
+  it("refuses source text and GameDocument reads after a source changes", async () => {
+    const { directory, server } = testServer();
+    servers.push(server);
+    const sourcePath = join(directory, "stale-read.pgn");
+    writeFileSync(sourcePath, '[Event "Stale"]\n\n1. e4 *\n', "utf8");
+
+    const registered = await server.inject({
+      method: "POST",
+      url: "/api/files",
+      payload: { path: sourcePath },
+    });
+    const file = await waitForReady(server, registered.json().id);
+    const game = (await server.inject({
+      method: "GET",
+      url: `/api/files/${file.id}/games`,
+    })).json().games[0];
+
+    writeFileSync(sourcePath, '[Event "Changed"]\n\n1. d4 *\n', "utf8");
+    for (const url of [`/api/games/${game.id}/pgn`, `/api/games/${game.id}`]) {
+      const response = await server.inject({ method: "GET", url });
+      expect(response.statusCode).toBe(409);
+      expect(response.json()).toEqual({ detail: expect.stringContaining("source changed since scan") });
+    }
+
+    rmSync(sourcePath);
+    const missing = await server.inject({ method: "GET", url: `/api/games/${game.id}/pgn` });
+    expect(missing.statusCode).toBe(409);
+    expect(missing.json()).toEqual({ detail: expect.stringContaining("source file missing") });
   });
 
   it("serves comments, NAGs, and graphics through the typed GameDocument wire", async () => {

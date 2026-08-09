@@ -1,12 +1,10 @@
-import { statSync } from "node:fs";
-
 import {
   openSqliteConnection,
   LibraryDatabase,
   type SqliteConnection,
 } from "./database.js";
+import { sourceFingerprint, sourceStats } from "./source.js";
 import {
-  fingerprintFile,
   scanPgn,
   type ScanProgress,
   type ScannedGame,
@@ -207,7 +205,7 @@ export class SqliteIndex implements Index {
     let transactionOpen = false;
 
     try {
-      const startedFingerprint = fingerprintFile(sourcePath);
+      const startedFingerprint = sourceFingerprint(sourcePath);
       database.exec("BEGIN");
       transactionOpen = true;
       database.prepare("DELETE FROM games WHERE file_id=?").run(fileId);
@@ -234,10 +232,10 @@ export class SqliteIndex implements Index {
       }
       if (batch.length > 0) insertBatch(insert, batch);
 
-      const finishedStats = fileStats(sourcePath);
-      const finishedFingerprint = fingerprintFile(sourcePath);
-      const verifiedStats = fileStats(sourcePath);
-      const verifiedFingerprint = fingerprintFile(sourcePath);
+      const finishedStats = sourceStats(sourcePath);
+      const finishedFingerprint = sourceFingerprint(sourcePath);
+      const verifiedStats = sourceStats(sourcePath);
+      const verifiedFingerprint = sourceFingerprint(sourcePath);
       if (
         startedFingerprint !== finishedFingerprint ||
         finishedFingerprint !== verifiedFingerprint ||
@@ -382,11 +380,6 @@ function insertBatch(
   rows: unknown[][],
 ): void {
   for (const row of rows) insert.run(row);
-}
-
-function fileStats(path: string): { size: bigint; mtimeNs: bigint } {
-  const stats = statSync(path, { bigint: true });
-  return { size: stats.size, mtimeNs: stats.mtimeNs };
 }
 
 function storedHeaders(raw: string): TagPair[] | undefined {
