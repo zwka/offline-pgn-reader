@@ -1,6 +1,6 @@
 # Offline PGN Reader — Design & Architecture Record
 
-Status: v1.1.0 · Date: 2026-08-08 · Audience: solo maintainer
+Status: v1.1.0 · Date: 2026-08-09 · Audience: solo maintainer
 
 ---
 
@@ -17,7 +17,7 @@ Status: v1.1.0 · Date: 2026-08-08 · Audience: solo maintainer
   keyboard navigation, click-to-jump, variation stepping.
 - Game list with Seven Tag Roster columns, paging, header search/filter.
 - Change detection (fingerprint) and re-scan; per-game malformed-record tolerance.
-- Raw-source PGN view/export per game (true round-trip: original bytes preserved via offsets).
+- Raw-source PGN view/export per game (original bytes preserved via offsets while the source fingerprint matches).
 - `[%cal]` arrow and `[%csl]` square-highlight graphics on the board.
 - Structured logging, health endpoint, scan progress reporting, schema-versioned cache.
 
@@ -43,12 +43,12 @@ search.
 | Decision | Choice | Rationale / trade-off |
 |---|---|---|
 | Web framework | **Fastify** | Typed route seams via TypeBox, low-overhead local HTTP, multipart/static plugins, and one Node process for production. FastAPI remains the rollback runtime and oracle. |
-| Index store | **SQLite** (WAL) | Zero-ops, single file in `data/`, fast enough for millions of rows, trivially backed up. Schema-versioned; rebuildable from source PGNs at any time (cache, not source of truth). |
+| Index store | **SQLite** (WAL), owned by `src/index.ts` | Zero-ops, single file in `data/`, fast enough for millions of rows, trivially backed up. `Index` owns registration, queries, status, tags, neighbors, transactional replacement, and reset; `src/database.ts` owns schema and connection lifecycle. The cache is schema-versioned and rebuildable from source PGNs at any time. |
 | PGN parsing | **Two-layer: custom streaming scanner for indexing + chess.js for hydration** | chess.js supplies the production SAN/RAV/NAG/FEN implementation while the scanner remains movetext-free for large indexes. The Python `python-chess` implementation runs against the same fixtures as the compatibility oracle. |
 | Board state | **Server computes FEN per node during hydration** | UI never replays moves; every node carries its position. Costs response size (~100 bytes/node), saves all client-side chess logic and repeated recomputation. |
 | Frontend | **Vanilla ES modules, no build step** | One dev, offline, no toolchain rot. ~1.5k lines of JS is well within no-framework territory. The board uses locally vendored CBurnett SVG pieces and inline graphics overlays. |
-| Concurrency | Scan runs in a worker thread; SQLite connection-per-operation with WAL | Keeps API responsive during multi-GB scans; progress is polled via `GET /api/files/{id}`. A replacement scan is transactional, so a failed replacement leaves the previous index intact. |
-| Source fidelity | Original bytes are never rewritten; index stores offsets and ordered Tag pairs; source responses decode the indexed span as UTF-8 | Parser normalization affects the document model only. The source file remains the byte-level source of truth and is always read from the stored span. |
+| Concurrency | **`LibraryService` owns Scan lifecycle; `src/scan-worker.ts` is a narrow worker adapter** | Keeps API responsive during multi-GB scans; progress is polled via `GET /api/files/{id}`. The Index replacement is transactional, so a failed replacement leaves the previous index intact, while remove/reset/shutdown are guarded by the same lifecycle owner. |
+| Source fidelity | **`src/source.ts` owns fingerprint and span access** | Original bytes are never rewritten; Index stores offsets and ordered Tag pairs; source responses decode the indexed span as UTF-8 only after bounded, race-checked reads. Parser normalization affects the document model only, and changed or missing sources are refused rather than served through stale offsets. |
 
 ## 4. Parser strategy
 
@@ -57,15 +57,18 @@ Binary chunk iteration with manual byte offset accounting, so offsets are exact 
 machine: `GAP → TAGS → MOVETEXT → (tag line seen) → boundary`. Crucially it tracks *brace-comment
 state across lines* so a `[` at line start inside a multi-line `{comment}` is not misread as a new
 game. Handles UTF-8 BOM, CRLF, `%` escape lines, `;` rest-of-line comments. Tag pairs are extracted
-with one compiled regex per line; movetext is otherwise only scanned for `{`/`}`/`;`. Games that
+with a tag regex applied once per candidate line; movetext is otherwise only scanned for `{`/`}`/`;`.
+Games that
 never produce a valid tag section still become records (flagged `warning`) as long as movetext is
 attributable; garbage between games is attached to the following boundary decision, never crashes
 the scan.
 
-**Layer B — hydrator (`src/hydration.ts`), read time.** Seek to `offset_start`, read
-`offset_end - offset_start` bytes, decode UTF-8 (`errors="replace"`), and feed the span to
-chess.js. The parser yields the full recursive game tree: comments, starting comments, NAGs,
-variations, and `[FEN]/[SetUp]` starting positions. The tree is converted iteratively
+**Layer B — source access and hydrator (`src/source.ts`, `src/hydration.ts`), read time.** The
+source module checks the stored fingerprint, validates the bounded span, reads exactly
+`offset_end - offset_start` bytes, and checks the fingerprint again before returning. The
+hydrator decodes UTF-8 (`errors="replace"`) and feeds the span to chess.js. The parser yields
+the full recursive game tree: comments, starting comments, NAGs, variations, and
+`[FEN]/[SetUp]` starting positions. The tree is converted iteratively
 (explicit stack — nesting depth bounded, but no recursion-limit risk) into the document model
 below. `pgnreader/parser.py` provides the same operation through python-chess for rollback and
 parity checks.
@@ -77,17 +80,21 @@ are merged into one comment string; `;` comments are folded into brace-style com
 (`%`) are dropped from the parsed model. `[%cal]` arrows and `[%csl]` highlights are extracted
 from root, move, and variation-start comments and removed from displayed comment text. Arrows are
 straight lines, and a shape in a variation-start comment is displayed on that node's post-move
-position. The source file remains available through the raw-source endpoint.
+position. The indexed source span remains available through the raw-source endpoint while the
+source fingerprint matches.
 
 ## 5. Indexing strategy
 
 - `files` row per registered path with fingerprint = (size, mtime_ns, SHA-1 of the first up to 64
   KiB and, for larger files, the last 64 KiB).
-  Re-scan only when fingerprint changes (or forced).
+  Unchanged ready files skip a scan; changed, pending, or failed files can be scanned, and force
+  always starts a replacement.
 - Scan streams the file once, emits `(idx_in_file, offset_start, offset_end, headers, warning)`
-  per game; replacement rows are inserted in batches of 500 inside one transaction. Memory is
-  O(one game's tag section).
-- Progress = bytes consumed / file size, stored in an in-process registry, exposed over the API.
+  per game; replacement rows are inserted in batches of 500 inside one transaction. Working
+  memory is bounded by the current game's tag section plus that fixed insert batch, not the
+  whole source.
+- Progress stores `bytesDone`, `bytesTotal`, and `gamesFound` in an in-process registry and
+  exposes those fields over the API.
 - Roster tags get dedicated indexed columns (event/site/date/round/white/black/result + eco,
   opening); all ordered Tag pairs, including duplicates, are kept in `tag_json`. Dedicated
   columns project the last value for a repeated tag. Search is `LIKE` over white, black, event,
@@ -150,7 +157,8 @@ The frontend is served at `/` and local assets at `/static/`. File and Game list
 existing snake_case wire names (`scan_status`, `game_count`, `idx_in_file`); progress,
 `GameDocument`, node, and rescan fields use camelCase (`bytesDone`, `gameId`, `startingComment`,
 `parentId`, `scanStarted`). Errors use `{detail}` with 400 request validation, 404 not-found,
-409 source/scan conflicts, and 422 invalid source type or PGN.
+409 source/scan conflicts, and 422 invalid source type or invalid, oversized, or unreadable
+hydration spans. Malformed PGN records are normally returned with warnings rather than a 422.
 File records report `pending`, `scanning`, `ready`, or `error`; `stale` is derived from the source
 fingerprint. Game records include the roster fields plus `eco`, `opening`, `has_fen`, `warning`,
 and `byte_size`.
@@ -170,7 +178,8 @@ and `byte_size`.
 ## 9. Performance strategy
 
 - Index: O(file size) single pass, no movetext parse, batched inserts — the only whole-file cost.
-- Read: O(selected game) — seek + read one span; list views are SQL paging, never hydration.
+- Read: O(selected game) plus bounded fingerprint samples — read one span; list views are SQL
+  paging, never hydration.
 - Notation rendering: DOM is built in a detached tree; every 1,500 nodes yields to an animation
   frame so large documents do not monopolize the tab.
 - Board updates are FEN lookups (no replay). Node map is a flat `id → node` array client-side.
@@ -182,9 +191,10 @@ and `byte_size`.
 Vitest (`tests-ts`), pytest (`tests`), and a cross-runtime parity test are the test layers.
 Synthetic fixtures in `tests/fixtures/` cover each PGN feature in isolation; the Python sample
 regression tests use the two tracked course files when present (185 and 351 games). TypeScript
-tests cover scanner, hydration, intake, Library actions, API/wire contracts, configuration, and
-CLI behavior; Python tests retain the rollback implementation checks. Playwright covers the
-browser workflow. The parity test runs the Node and Python HTTP implementations against the same
+tests cover scanner, source-byte safety, hydration, Index persistence, Scan lifecycle, projection,
+intake, Library actions, API/wire contracts, configuration, and CLI behavior; Python tests retain
+the rollback implementation checks. Playwright covers the browser workflow. The parity test runs
+the Node and Python HTTP implementations against the same
 ten-fixture manifest (`tests/fixtures/parity_manifest.json`) and separate temporary SQLite files,
 then compares scan records, schema columns, indexed offsets, wire casing, ordered Tag pairs, flat
 GameDocument nodes, source text, and route error envelopes.
@@ -192,7 +202,9 @@ GameDocument nodes, source text, and route error envelopes.
 ## 11. Release strategy
 
 Single folder, `npm install`; production runs via `npm start` and owns the local HTTP routes and
-SQLite cache. TypeScript CLI subcommands are `serve`, `index [--force] PATH...`, and `reset`.
+SQLite cache. `src/index.ts` owns persistence, `src/source.ts` owns source-byte protection,
+`LibraryService` owns Scan coordination, and `ReaderProjection` owns response translation.
+TypeScript CLI subcommands are `serve`, `index [--force] PATH...`, and `reset`.
 The Python environment is optional and is retained only for `python -m pgnreader serve` rollback
 and oracle validation; use a separate data directory and port for that process. The acceptance
 gate is `npm run test:all`. `data/` is disposable cache — backup is optional, rebuild is one

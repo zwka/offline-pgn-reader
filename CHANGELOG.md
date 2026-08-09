@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.1.0 — 2026-08-08
+## 1.1.0 — 2026-08-09
 
 - **TypeScript production cutover**: `npm start` now launches the Fastify /
   TypeScript server and owns the browser routes and SQLite cache. The Python /
@@ -24,6 +24,16 @@
 - **Fixed board square jitter**: grid rows are now fixed `1fr` tracks, so
   square size no longer depends on piece placement and never shifts between
   moves.
+- **Deep module ownership and source safety**: `src/index.ts` owns Index
+  persistence and transactional replacement, `src/source.ts` owns
+  fingerprints and bounded race-checked source spans, `LibraryService` owns
+  Scan lifecycle and protections, `src/hydration.ts` owns GameDocument
+  recovery and annotation hydration, and `src/projection.ts` owns reader
+  response translation and error envelopes.
+- **Production TypeScript Scan benchmark**: the generated-source production
+  path indexed 1,000,000 records in 12.064 s at 147.6 MiB peak RSS on the
+  recorded arm64 macOS run; all Index rows, offsets, and sampled source spans
+  verified successfully. See [the benchmark report](docs/benchmarks/typescript-scan.md).
 
 ## 1.0.0 — 2026-07-09
 

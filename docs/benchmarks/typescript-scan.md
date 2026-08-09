@@ -12,10 +12,11 @@ From the repository root:
 npm run benchmark -- --games 1000000
 ```
 
-The default is 1,000,000 game records. The source and SQLite `Library` are
-created under an ignored `.benchmark-scan-*` directory in the checkout and are
-removed when the command exits. Use `--keep` only when investigating a failed
-run. `--json` emits the measurement as one JSON object for automation.
+The default is 1,000,000 game records. The source and isolated SQLite `Index`
+are created under an ignored `.benchmark-scan-*` directory in the checkout and
+are removed when the command exits by default. Use `--keep` only when
+investigating a failed run. `--json` emits the measurement as one JSON object
+for automation.
 
 ## Method
 

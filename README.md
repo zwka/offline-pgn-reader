@@ -11,15 +11,15 @@ No cloud, no SaaS, no external assets — everything runs from this folder.
 ## Features
 
 - **Streaming indexer** — scans multi-hundred-MB PGN files in one pass with
-  constant memory, storing byte offsets and headers in a local SQLite cache.
+  bounded memory, storing byte offsets and headers in a local SQLite cache.
   The repeatable TypeScript production benchmark and the separate pre-cutover
   Python reference run are documented in [the scan benchmark report](docs/benchmarks/typescript-scan.md).
-- **Lazy game loading** — opening a game seeks straight to its byte span;
-  nothing else in the file is read.
+- **Lazy game loading** — opening a game reads the indexed byte span plus
+  bounded fingerprint samples; it never scans the full source.
 - **Full annotation fidelity** — brace comments (multi-line), semicolon
   comments, NAGs (numeric and `!?`-style suffixes), recursive variations,
   starting comments, FEN/SetUp starting positions. The move tree is explicit;
-  the indexed source span remains available without parser normalization.
+  the indexed source span is preserved separately from parser normalization.
 - **Chessable-style reader** — board + variation-aware notation with prose
   comments in the reading flow, sidelines indented and collapsible, NAG
   glyphs, current-move highlight, keyboard-first navigation.
@@ -27,9 +27,10 @@ No cloud, no SaaS, no external assets — everything runs from this folder.
   embedded in comments are drawn on the board (Lichess brush colors) instead
   of cluttering the comment text.
 - **Malformed-file tolerance** — broken games are indexed, flagged and
-  readable to the extent they parse; they never break the rest of the file.
-- **Change detection** — files are fingerprinted; re-scan happens only when
-  content changes (or is forced).
+  readable to the extent they parse; neighboring games remain readable. An
+  unterminated brace comment can still merge records (see Known limitations).
+- **Change detection** — source fingerprints mark changed indexes stale;
+  unchanged ready sources skip rescans, and `--force` overrides the skip.
 
 ## Requirements
 
@@ -118,7 +119,7 @@ TypeScript process.
 
 `→`/`←` step through the current line · `↓`/`↑` cycle sibling variations ·
 `Home`/`End` line start/end · `[`/`]` previous/next game · `f` flip board ·
-`p` raw PGN source · `?` help
+`p` raw PGN source · the `?` button opens help
 
 ## Configuration
 
@@ -159,11 +160,14 @@ version:
 frontend/            vanilla-JS SPA (board, notation tree, library)
 frontend/pieces/     local CBurnett SVG chess pieces
 src/server.ts        Fastify routes + static hosting (production)
-src/library.ts       library ops and background scans
-src/projection.ts    Index/GameDocument response projection
+src/library.ts       Library intake and Scan lifecycle
+src/scan-worker.ts   narrow worker adapter for background scans
+src/index.ts         Index persistence, replacement, reset, and status
+src/source.ts        source fingerprints and bounded source-byte spans
+src/projection.ts    Index/GameDocument response projection + errors
 src/scanner.ts       streaming boundary scanner (index layer, no movetext parse)
 src/hydration.ts     per-game hydration via chess.js → document model
-src/database.ts      SQLite cache (schema-versioned, WAL)
+src/database.ts      SQLite schema and connection lifecycle (WAL)
 pgnreader/           Python rollback runtime and oracle implementation
 tests/               Python oracle and shared regression fixtures
 tests-ts/             TypeScript and cross-runtime parity tests
@@ -173,8 +177,8 @@ tests-ts/             TypeScript and cross-runtime parity tests
 
 - Consecutive brace comments on one move are merged (parser behavior);
   semicolon comments are preserved but rendered as brace-style comments.
-  The original source span is always available via *Raw PGN source* (decoded as
-  UTF-8 for the HTTP/text response).
+  The indexed source span is available via *Raw PGN source* while the source
+  fingerprint still matches (decoded as UTF-8 for the HTTP/text response).
 - `%`-escape lines are honored (skipped) but not represented in the model.
 - An **unterminated** `{` comment in a malformed file swallows subsequent
   games into one record until the comment closes; the 8 MiB per-game cap

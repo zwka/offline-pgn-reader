@@ -1,4 +1,4 @@
-# Validation Report — v1.1.0 (2026-08-08)
+# Validation Report — v1.1.0 (2026-08-09)
 
 Every subsystem below lists: failure modes considered, how it is tested,
 the observed result, and remediation if it fails in the field. The final gate is
@@ -9,29 +9,44 @@ The Python suite remains the rollback oracle. The TypeScript suite owns
 production behavior; the cross-runtime parity test uses the same ten source
 fixtures and separate SQLite databases for both implementations.
 
-Audit run on 2026-08-08: `npm run typecheck` passed; `npm test` passed 10 test
-files / 58 tests; `npm run test:python` passed 75 tests; `npm run test:parity`
-passed 1 parity test; and `npm run test:browser` passed 10 Playwright tests.
-`npm run test:all` repeated the full gate successfully. The Python run emitted
-two dependency deprecation warnings, with no test failures.
+The latest recorded full gate on 2026-08-08 passed: `npm run typecheck`, `npm test`
+(10 test files / 58 tests), `npm run test:python` (75 tests), `npm run test:parity`
+(1 parity test), and `npm run test:browser` (10 Playwright tests); `npm run test:all`
+repeated that gate successfully. The final deep-module deliveries added direct
+coverage after that recorded run. This checkout now contains 16 TypeScript test
+files / 80 tests and 76 Python test cases when both tracked sample sources are
+present. `tests/test_dependencies.py` treats Python deprecation warnings as errors.
+
+The result table below records the latest successful gate; current audit outcomes
+are listed above.
+
+Documentation audit checks on 2026-08-09: `npm run typecheck` passed;
+`npm test -- --exclude tests-ts/parity.test.ts` passed 15 test files / 79 tests;
+`npm run test:browser` passed 10 Playwright tests; and
+`npm run benchmark -- --games 1000 --json` verified 1,000 generated records,
+offsets, Index rows, and 3 sampled source spans. The full `npm test` and
+`npm run test:parity` runs each stopped at the Python parity case because
+`.venv/bin/python` is absent; `npm run test:python` failed for the same missing
+environment, so `npm run test:all` is not currently green. No dependencies were
+downloaded during the audit.
 
 | # | Area | Failure modes | Tested by | Result | Remediation |
 |---|------|---------------|-----------|--------|-------------|
 | 1 | PGN header extraction | escaped quotes, non-roster tags, tag order loss | `tests-ts/scanner.test.ts`, `tests-ts/games.test.ts`, `tests/test_scanner.py::test_two_games_boundaries_and_headers`, `tests/test_parser.py::test_headers_preserved_in_order` | ✅ order + extras preserved; `tag_json`, `headers`, and `/tags` keep duplicates | source headers remain re-readable from the indexed span |
 | 2 | Game boundary detection | `[` at line start inside multi-line `{}` comment; headers-only games; tagless movetext | `tests-ts/scanner.test.ts`, `tests/test_scanner.py::test_multiline_comment_with_fake_tag_is_not_a_boundary`, `tests/test_scanner.py::test_headers_only_game_detected`, `tests/test_scanner.py::test_movetext_without_tags_flagged` | ✅ brace state tracked across lines; 185/351 exact counts on real samples | force re-scan; an unterminated comment may merge records and is bounded at hydration |
-| 3 | Large-file indexing | memory blow-up, quadratic scans | streaming scanner tests plus the repeatable production TypeScript benchmark in `docs/benchmarks/typescript-scan.md` | ✅ scanner is one-pass and bounded; the measured TypeScript run scanned 1M games in 12.064 s at 147.6 MiB peak RSS, while the historical 19.5 s / 38 MB result remains the separate Python reference benchmark | progress reports bytes and games; a failed scan can be retried from the source |
-| 4 | Offset-based retrieval | stale offsets after file edit, span corruption | `tests-ts/games.test.ts`, `tests-ts/scan.test.ts`, `tests/test_service.py::test_get_game_document_by_offset`, `tests/test_samples.py::test_samples_source_round_trip` | ✅ indexed spans are byte-addressed; fingerprint marks a file stale and reads reject changed sources | stale badge + re-scan; PGN hydration failures return HTTP 422 |
+| 3 | Large-file indexing | memory blow-up, quadratic scans | `tests-ts/scanner.test.ts`, `tests-ts/benchmark.test.ts`, plus the repeatable production TypeScript benchmark in `docs/benchmarks/typescript-scan.md` | ✅ scanner is one-pass and bounded; the measured TypeScript run scanned 1M games in 12.064 s at 147.6 MiB peak RSS, while the historical 19.5 s / 38 MB result remains the separate Python reference benchmark | progress reports bytes and games; a failed scan can be retried from the source |
+| 4 | Offset-based retrieval | stale offsets after file edit, span corruption, read races | `tests-ts/games.test.ts`, `tests-ts/source.test.ts`, `tests-ts/source-race.test.ts`, `tests-ts/scan.test.ts`, `tests/test_service.py::test_get_game_document_by_offset`, `tests/test_samples.py::test_samples_source_round_trip` | ✅ indexed spans are byte-addressed; fingerprint and before/after checks mark changed sources stale and reject reads | stale badge + re-scan; bounded or invalid spans return HTTP 422 |
 | 5 | SAN parsing | illegal moves, nonstandard move numbers (`1. c6` for Black) | TypeScript hydration fixtures plus Python full hydration sweep over all 536 sample games; `tests/test_samples.py::test_banzea_intro_prose_preserved` | ✅ 0 warnings across the tracked samples | illegal moves are reported and the legal prefix is retained |
 | 6 | Comment preservation | multi-line comments, semicolon comments dropped by parser libraries | `tests-ts/hydration.test.ts`, `tests/test_parser.py::test_brace_comments_and_pregame_comment`, `tests/test_parser.py::test_semicolon_comment_preserved` | ✅ `;` comments are folded into parser comments while source text remains unchanged | source endpoint returns the indexed span as decoded text; source bytes are not rewritten |
 | 7 | NAG preservation | suffix (`!?`) vs numeric (`$5`) forms, multiple NAGs per move | `tests-ts/hydration.test.ts`, `tests/test_parser.py::test_nags_suffix_and_numeric`, sample spot check (`17.h4 $6`) | ✅ both forms; glyph map with `$n` fallback for unknown | unknown NAGs still stored numerically |
 | 8 | Variation tree | nesting, sibling order, starting comments | `tests-ts/hydration.test.ts`, `tests/test_parser.py::test_variation_tree_structure`, `tests/test_samples.py::test_kabadayi_annotation_fidelity` | ✅ explicit flat tree, exact source order | normalized fixture re-parse proves tree shape survives |
 | 9 | FEN/SetUp | invalid FEN, mid-game ply/move numbers | `tests-ts/hydration.test.ts`, `tests/test_parser.py::test_fen_setup_start_position`, `tests/test_parser.py::test_invalid_fen_degrades_with_warning` | ✅ FEN-start move numbers render correctly; invalid FEN → standard start + warning | warning surfaces in reader UI |
 | 10 | Malformed PGN tolerance | garbage tokens silently vanishing, broken game killing file | `tests-ts/hydration.test.ts`, `tests-ts/scan.test.ts`, `tests/test_scanner.py::test_malformed_game_does_not_break_neighbors`, `tests/test_parser.py::test_malformed_movetext_keeps_prefix_and_warns` | ✅ neighbors intact; unrecognized tokens reported as warnings | per-game warnings in list + reader; malformed records do not abort a scan |
-| 11 | File re-scan | unchanged files re-scanned wastefully; changes missed; replacement failure loses the prior index | `tests-ts/scan.test.ts`, `tests-ts/cli.test.ts`, `tests/browser/smoke.spec.ts`, `tests/test_service.py::test_unchanged_file_skips_rescan`, `tests/test_service.py::test_changed_file_marked_stale_and_rescan_updates` | ✅ fingerprint (size+mtime+sampled SHA-1) gates scans; failed replacement rolls back game rows | `--force` / UI Re-scan override; retry after restart from `pending` |
+| 11 | File re-scan | unchanged files re-scanned wastefully; changes missed; replacement failure loses the prior index | `tests-ts/index.test.ts`, `tests-ts/scan.test.ts`, `tests-ts/scan-lifecycle.test.ts`, `tests-ts/cli.test.ts`, `tests/browser/smoke.spec.ts`, `tests/test_service.py::test_unchanged_file_skips_rescan`, `tests/test_service.py::test_changed_file_marked_stale_and_rescan_updates` | ✅ fingerprint (size+mtime+sampled SHA-1) gates scans; failed replacement rolls back game rows and lifecycle guards protect remove/reset/shutdown | `--force` / UI Re-scan override; retry after restart from `pending` |
 | 12 | Browser compatibility | Chromium rendering, local assets, source intake and Library actions | `tests/browser/smoke.spec.ts` under `playwright.config.ts` with an isolated Node server | ✅ Playwright covers the Library, Game list, reader, tags/source, graphics, variations, stale re-scan, removal, and reset flows | keep browser assets local; the app has no CDN/runtime network dependency |
 | 13 | Notation rendering | variation context loss, comment blobs, huge trees freezing tab | `tests/browser/smoke.spec.ts`, `frontend/notation.js` chunking at 1,500 nodes | ✅ sidelines are indented/collapsible, comments are prose blocks, and source text is separately available | progressive rendering yields between chunks |
 | 14 | Navigation correctness | wrong sibling cycling, dead ends | browser test cycles `e5` / `c5` in `tests/fixtures/variations.pgn` with ArrowUp/ArrowDown; reader controls cover Home/End and adjacent games | ✅ sibling order and FEN-backed board positions match the document tree | keyboard map remains documented in the help overlay |
-| 15 | Startup/shutdown | port conflicts, schema drift, dirty WAL | `npm start`, `tests-ts/health.test.ts`, `tests-ts/cli.test.ts`, schema-version logic in `src/database.ts` | ✅ Node health endpoint reports db state; worker cleanup and reset protections are covered | use `npm start -- reset`; Python reset remains rollback-only and must use isolated data |
+| 15 | Startup/shutdown | port conflicts, schema drift, dirty WAL | `npm start`, `tests-ts/health.test.ts`, `tests-ts/cli.test.ts`, `tests-ts/scan-lifecycle.test.ts`, schema-version logic in `src/database.ts` | ✅ Node health endpoint reports db state; worker cleanup, interrupted-scan recovery, and reset protections are covered | use `npm start -- reset`; Python reset remains rollback-only and must use isolated data |
 
 ## Debugging pass findings (Python oracle history; fixed during review)
 
