@@ -4,6 +4,8 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { hydrateGame } from "../src/hydration.js";
+import { readSourceSpan } from "../src/source.js";
+import { scanPgn } from "../src/scanner.js";
 
 describe("GameDocument hydration", () => {
   it("keeps ordered headers and builds the server-positioned main line", () => {
@@ -271,4 +273,76 @@ describe("GameDocument hydration", () => {
     expect(document.nodes.slice(1).map((node) => node.san)).toEqual(["e4", "e5"]);
     expect(document.warnings.some((warning) => warning.includes("could not parse PGN tree"))).toBe(true);
   });
+
+  it("adapts null moves and comments after variations without changing the source", () => {
+    const source = Buffer.from(
+      [
+        '[Event "Parser adaptation"]',
+        '[Result "*"]',
+        "",
+        "1. e4 (1. d4) {comment after variation} e5 2. -- *",
+      ].join("\n"),
+    );
+    const original = Buffer.from(source);
+
+    const document = hydrateGame(source);
+
+    expect(document.nodes.map((node) => node.san)).toEqual([null, "e4", "e5", "--", "d4"]);
+    expect(document.nodes[0].children).toEqual([1, 4]);
+    expect(document.nodes[1]).toMatchObject({
+      comment: "comment after variation",
+      children: [2],
+    });
+    expect(document.nodes[3]).toMatchObject({
+      uci: "0000",
+      color: "w",
+      ply: 3,
+    });
+    expect(document.warnings).toEqual([]);
+    expect(source).toEqual(original);
+    expect(document.source).toBe(original.toString("utf8"));
+  });
+
+  it("keeps recovery annotations while retaining the legal prefix", () => {
+    const source = Buffer.from(
+      [
+        '[Event "Recover annotations"]',
+        '[Result "*"]',
+        "",
+        "{intro} 1. e4! {best} e5 $13 2. Zz9 2. Nf3 *",
+      ].join("\n"),
+    );
+    const original = Buffer.from(source);
+
+    const document = hydrateGame(source);
+    const moves = document.nodes.slice(1);
+
+    expect(moves.map((node) => node.san)).toEqual(["e4", "e5", "Nf3"]);
+    expect(document.nodes[0].comment).toBe("intro");
+    expect(moves[0]).toMatchObject({ comment: "best", nags: [1], glyphs: ["!"] });
+    expect(moves[1]).toMatchObject({ nags: [13], glyphs: ["∞"] });
+    expect(document.warnings.some((warning) => warning.includes("could not parse PGN tree"))).toBe(true);
+    expect(source).toEqual(original);
+    expect(document.source).toBe(original.toString("utf8"));
+  });
+
+  it("hydrates every tracked sample game without recovery warnings", async () => {
+    const samples = [
+      ["samples/Can Kabadayi - Fundamental Chess Calculation Skills.pgn", 351],
+      ["samples/Alex Banzea - The Caro-Kann Simplified.pgn", 185],
+    ] as const;
+
+    for (const [path, expectedGames] of samples) {
+      let games = 0;
+      for await (const scanned of scanPgn(resolve(path))) {
+        const document = hydrateGame(
+          readSourceSpan(resolve(path), scanned.offsetStart, scanned.offsetEnd, 8 * 1024 * 1024),
+          scanned.headers,
+        );
+        expect(document.warnings, `${path} game ${scanned.idxInFile}`).toEqual([]);
+        games += 1;
+      }
+      expect(games).toBe(expectedGames);
+    }
+  }, 30_000);
 });

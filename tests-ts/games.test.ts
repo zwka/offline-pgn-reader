@@ -347,6 +347,58 @@ describe("indexed Game list contract", () => {
     expect(fenDocument.nodes[1]).toMatchObject({ san: "Rf8+", uci: "f7f8", parentId: 0 });
   });
 
+  it("keeps a malformed GameDocument prefix without affecting nearby records", async () => {
+    const { directory, server } = testServer();
+    servers.push(server);
+    const sourceBytes = readFileSync(resolve("tests/fixtures/malformed_middle.pgn"));
+    const sourcePath = join(directory, "malformed-middle.pgn");
+    writeFileSync(sourcePath, sourceBytes);
+
+    const registered = await server.inject({
+      method: "POST",
+      url: "/api/files",
+      payload: { path: sourcePath },
+    });
+    const file = await waitForReady(server, registered.json().id);
+    const games = (await server.inject({
+      method: "GET",
+      url: `/api/files/${file.id}/games`,
+    })).json().games;
+
+    expect(games).toHaveLength(3);
+    const documents = await Promise.all(games.map(async (game: { id: number }) => {
+      const response = await server.inject({ method: "GET", url: `/api/games/${game.id}` });
+      expect(response.statusCode).toBe(200);
+      expect(Value.Check(GameDocumentSchema, response.json())).toBe(true);
+      return response.json();
+    }));
+
+    expect(documents[0].nodes.slice(1).map((node: { san: string }) => node.san)).toEqual([
+      "e4",
+      "e5",
+      "Nf3",
+    ]);
+    expect(documents[1].nodes.slice(1).map((node: { san: string }) => node.san)).toEqual([
+      "e4",
+      "e5",
+    ]);
+    expect(documents[1].warnings).toEqual(expect.arrayContaining([
+      expect.stringContaining("could not parse PGN tree"),
+      expect.stringContaining("could not parse move"),
+    ]));
+    expect(documents[1].warnings).toHaveLength(4);
+    expect(documents[2].nodes.slice(1).map((node: { san: string }) => node.san)).toEqual([
+      "d4",
+      "Nf6",
+      "c4",
+      "e6",
+    ]);
+    expect(documents[0].neighbors.next).toBe(documents[1].gameId);
+    expect(documents[1].neighbors).toEqual({ prev: documents[0].gameId, next: documents[2].gameId });
+    expect(documents[2].neighbors.prev).toBe(documents[1].gameId);
+    expect(readFileSync(sourcePath)).toEqual(sourceBytes);
+  });
+
   it("serves decoded source text and ordered duplicate tag pairs", async () => {
     const { directory, server } = testServer();
     servers.push(server);

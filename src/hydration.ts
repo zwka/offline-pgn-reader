@@ -6,6 +6,7 @@ import type { GameDocumentPayload, GameNode } from "./wire.js";
 
 const HEADER_LINE_RE = /^[ \t]*\[[ \t]*([A-Za-z][A-Za-z0-9_]*)[ \t]+"((?:[^"\\]|\\.)*)"[ \t]*\][ \t]*(?:\r)?$/gm;
 const RESULT_TOKENS = new Set(["1-0", "0-1", "1/2-1/2", "*"]);
+const NULL_MOVE_TOKEN = "null";
 
 export class HydrationError extends Error {
   constructor(message: string) {
@@ -25,6 +26,16 @@ type ParsedNode = {
 type ParsedGame = {
   root: ParsedNode;
 };
+
+type RecoveryItem =
+  | { kind: "comment"; text: string }
+  | { kind: "token"; text: string };
+
+type RecoveryToken =
+  | { kind: "move"; token: string; suffix: string[]; nag: string[] }
+  | { kind: "nag"; nags: number[] }
+  | { kind: "result" }
+  | { kind: "skip" };
 
 type Arrow = {
   from: string;
@@ -132,12 +143,12 @@ export function hydrateGame(
   const nodes: GameNode[] = [rootNode(board)];
   let parsed: ParsedGame;
   try {
-    parsed = parse(normalizeCommentsForParser(removeEscapeLines(parseSource))) as ParsedGame;
+    parsed = parse(adaptParserSource(parseSource)) as ParsedGame;
   } catch (error) {
     warnings.push(
       `could not parse PGN tree: ${error instanceof Error ? error.message : String(error)}`,
     );
-    hydrateMainLine(board, nodes, removeHeaderLines(parseSource), warnings);
+    hydrateMainLine(board, nodes, parseSource, warnings);
     return documentPayload(headers, nodes, warnings, source);
   }
 
@@ -246,9 +257,10 @@ function appendMove(
 ): GameNode | null {
   const color = board.turn();
   const moveNumber = board.moveNumber();
+  const nullMove = token === NULL_MOVE_TOKEN;
   let move;
   try {
-    move = board.move(token, { strict: false });
+    move = board.move(nullMove ? "--" : token, { strict: false });
   } catch (error) {
     warnings.push(
       `could not parse move ${token}: ${error instanceof Error ? error.message : String(error)}`,
@@ -263,8 +275,8 @@ function appendMove(
   const node: GameNode = {
     id,
     parentId,
-    san: move.san,
-    uci: `${move.from}${move.to}${move.promotion ?? ""}`,
+    san: nullMove ? "--" : move.san,
+    uci: nullMove ? "0000" : `${move.from}${move.to}${move.promotion ?? ""}`,
     ply: positionPly(board),
     moveNumber,
     color,
@@ -280,6 +292,19 @@ function appendMove(
   nodes[parentId].children.push(id);
   nodes.push(node);
   return node;
+}
+
+function appendComment(node: GameNode, comment: string): void {
+  const annotations = extractAnnotations(joinComments(node.comment, comment));
+  node.comment = annotations.comment;
+  node.arrows.push(...annotations.arrows);
+  node.highlights.push(...annotations.highlights);
+}
+
+function appendNags(node: GameNode, nags: number[]): void {
+  node.nags.push(...nags);
+  node.nags.sort((left, right) => left - right);
+  node.glyphs = node.nags.map((nag) => NAG_GLYPHS[nag] ?? `$${nag}`);
 }
 
 function applyAnnotations(node: GameNode, annotations: Annotations): void {
@@ -300,7 +325,7 @@ function parsedNags(parsed: ParsedNode): number[] {
 function extractAnnotations(comment: string): Annotations {
   const arrows: Arrow[] = [];
   const highlights: Highlight[] = [];
-  const cleaned = comment.replace(
+  const cleaned = comment.replace(/[\r\n]+/g, " ").replace(
     SHAPE_RE,
     (_match: string, prefix: string, specs: string, suffix: string) => {
       for (const spec of specs.split(",")) {
@@ -322,6 +347,174 @@ function extractAnnotations(comment: string): Annotations {
 function joinComments(first: string, second: string | undefined): string {
   if (!second) return first;
   return first ? `${first} ${second}` : second;
+}
+
+function adaptParserSource(source: string): string {
+  const commentsNormalized = normalizeCommentsForParser(removeEscapeLines(source));
+  const variationCommentsMoved = relocatePostVariationComments(commentsNormalized);
+  return replaceNullMoves(normalizeCommentsForParser(variationCommentsMoved));
+}
+
+type RewrittenSequence = {
+  text: string;
+  index: number;
+  closed: boolean;
+};
+
+/**
+ * chess.js rejects comments after a completed RAV, although those comments
+ * are legal PGN and belong to the move before the variation. Move such
+ * comments before the consecutive variation block in parser-only text.
+ */
+function relocatePostVariationComments(source: string): string {
+  return rewriteParserSequence(source, 0, false).text;
+}
+
+function rewriteParserSequence(
+  source: string,
+  start: number,
+  inVariation: boolean,
+): RewrittenSequence {
+  let index = start;
+  let text = "";
+
+  while (index < source.length) {
+    const character = source[index];
+    if (inVariation && character === ")") {
+      return { text, index: index + 1, closed: true };
+    }
+
+    const tagEnd = tagLineEnd(source, index);
+    if (tagEnd !== null) {
+      text += source.slice(index, tagEnd);
+      index = tagEnd;
+      continue;
+    }
+
+    if (character === "{") {
+      const end = source.indexOf("}", index + 1);
+      if (end === -1) {
+        return { text: text + source.slice(index), index: source.length, closed: false };
+      }
+      text += source.slice(index, end + 1);
+      index = end + 1;
+      continue;
+    }
+
+    if (character === "(") {
+      const block = rewriteVariationBlock(source, index);
+      text += block.text;
+      index = block.index;
+      continue;
+    }
+
+    text += character;
+    index += 1;
+  }
+
+  return { text, index, closed: false };
+}
+
+function rewriteVariationBlock(source: string, start: number): RewrittenSequence {
+  const groups: string[] = [];
+  const movedComments: string[] = [];
+  let index = start;
+  let trailingWhitespace = "";
+
+  while (index < source.length && source[index] === "(") {
+    const inner = rewriteParserSequence(source, index + 1, true);
+    groups.push(`(${inner.text}${inner.closed ? ")" : ""}`);
+    index = inner.index;
+
+    const whitespaceStart = index;
+    while (index < source.length && /\s/.test(source[index])) index += 1;
+    let gap = source.slice(whitespaceStart, index);
+
+    while (index < source.length && source[index] === "{") {
+      const end = source.indexOf("}", index + 1);
+      if (end === -1) {
+        movedComments.push(source.slice(index));
+        index = source.length;
+        gap = "";
+        break;
+      }
+      movedComments.push(source.slice(index, end + 1));
+      index = end + 1;
+      const afterComment = index;
+      while (index < source.length && /\s/.test(source[index])) index += 1;
+      gap = source.slice(afterComment, index);
+    }
+
+    trailingWhitespace = gap;
+    if (source[index] !== "(") break;
+  }
+
+  const groupText = groups.join(" ");
+  if (movedComments.length === 0) {
+    return { text: groupText + trailingWhitespace, index, closed: true };
+  }
+  return {
+    text: `${movedComments.join(" ")} ${groupText}${trailingWhitespace}`,
+    index,
+    closed: true,
+  };
+}
+
+function replaceNullMoves(source: string): string {
+  let result = "";
+  let index = 0;
+
+  while (index < source.length) {
+    const tagEnd = tagLineEnd(source, index);
+    if (tagEnd !== null) {
+      result += source.slice(index, tagEnd);
+      index = tagEnd;
+      continue;
+    }
+
+    const character = source[index];
+    if (character === "{") {
+      const end = source.indexOf("}", index + 1);
+      if (end === -1) return result + source.slice(index);
+      result += source.slice(index, end + 1);
+      index = end + 1;
+      continue;
+    }
+    if (/\s/.test(character) || character === "(" || character === ")") {
+      result += character;
+      index += 1;
+      continue;
+    }
+
+    const start = index;
+    while (
+      index < source.length &&
+      !/\s/.test(source[index]) &&
+      source[index] !== "{" &&
+      source[index] !== "}" &&
+      source[index] !== "(" &&
+      source[index] !== ")"
+    ) {
+      index += 1;
+    }
+    result += normalizeNullMoveToken(source.slice(start, index));
+  }
+
+  return result;
+}
+
+function normalizeNullMoveToken(token: string): string {
+  const match = /^(\d+\.{1,3})?(Z0|--|null)([!?]*)$/.exec(token);
+  return match ? `${match[1] ?? ""}${NULL_MOVE_TOKEN}${match[3]}` : token;
+}
+
+function tagLineEnd(source: string, index: number): number | null {
+  const lineStart = source.lastIndexOf("\n", index - 1) + 1;
+  if (source.slice(lineStart, index).trim().length > 0) return null;
+  const newline = source.indexOf("\n", index);
+  const lineEnd = newline === -1 ? source.length : newline;
+  const line = source.slice(lineStart, lineEnd).replace(/\r$/, "");
+  return TAG_LINE_RE.test(line) ? lineEnd : null;
 }
 
 /**
@@ -401,14 +594,55 @@ function hydrateMainLine(
   source: string,
   warnings: string[],
 ): void {
-  const tokens = tokenizeMainLine(source, warnings);
-  for (const rawToken of tokens) {
-    const token = normalizeMoveToken(rawToken);
-    if (!token || isMoveNumber(token)) continue;
-    if (RESULT_TOKENS.has(token)) break;
-    if (token.startsWith("$")) continue;
-    appendMove(board, nodes, nodes.length - 1, token, warnings);
+  for (const item of tokenizeMainLine(source, warnings)) {
+    if (item.kind === "comment") {
+      appendComment(nodes.at(-1)!, item.text);
+      continue;
+    }
+
+    const parsed = parseRecoveryToken(item.text);
+    if (parsed.kind === "result") break;
+    if (parsed.kind === "nag") {
+      if (nodes.length > 1) appendNags(nodes.at(-1)!, parsed.nags);
+      continue;
+    }
+    if (parsed.kind !== "move") continue;
+
+    appendMove(board, nodes, nodes.length - 1, parsed.token, warnings, {
+      move: parsed.token,
+      suffix: parsed.suffix,
+      nag: parsed.nag,
+      variations: [],
+    });
   }
+}
+
+function parseRecoveryToken(rawToken: string): RecoveryToken {
+  let token = rawToken.replace(/^\d+\.{1,3}/, "");
+  if (!token || isMoveNumber(token)) return { kind: "skip" };
+  if (RESULT_TOKENS.has(token)) return { kind: "result" };
+
+  if (/^\$\d+(?:\$\d+)*$/.test(token)) {
+    const nags = [...token.matchAll(/\$(\d+)/g)]
+      .map((match) => Number(match[1]))
+      .filter((nag) => Number.isInteger(nag));
+    return { kind: "nag", nags };
+  }
+
+  const suffixMatch = /([!?]{1,2})$/.exec(token);
+  const suffix = suffixMatch ? [suffixMatch[1]] : [];
+  if (suffixMatch) token = token.slice(0, -suffixMatch[1].length);
+  if (!token) {
+    const nag = SUFFIX_NAGS[suffix[0]];
+    return nag === undefined ? { kind: "skip" } : { kind: "nag", nags: [nag] };
+  }
+
+  return {
+    kind: "move",
+    token: normalizeNullMoveToken(token),
+    suffix,
+    nag: [],
+  };
 }
 
 function rootNode(board: Chess): GameNode {
@@ -458,10 +692,6 @@ function unescapeTagValue(value: string): string {
   return value.replaceAll('\\"', '"').replaceAll("\\\\", "\\");
 }
 
-function removeHeaderLines(source: string): string {
-  return source.replace(HEADER_LINE_RE, "");
-}
-
 function removeEscapeLines(source: string): string {
   let result = "";
   let lineStart = true;
@@ -494,24 +724,36 @@ function removeEscapeLines(source: string): string {
   return result;
 }
 
-function tokenizeMainLine(source: string, warnings: string[]): string[] {
-  const tokens: string[] = [];
+function tokenizeMainLine(source: string, warnings: string[]): RecoveryItem[] {
+  const items: RecoveryItem[] = [];
   let token = "";
   let variationDepth = 0;
   let lineHasOnlyWhitespace = true;
 
   const flush = () => {
-    if (token) tokens.push(token);
+    if (token) items.push({ kind: "token", text: token });
     token = "";
   };
 
-  const skipBraceComment = (start: number): number => {
+  const skipBraceComment = (start: number, keep: boolean): number => {
     const end = source.indexOf("}", start + 1);
     if (end === -1) {
       warnings.push("unterminated comment ignored while hydrating game");
+      if (keep) items.push({ kind: "comment", text: source.slice(start + 1) });
       return source.length;
     }
+    if (keep) items.push({ kind: "comment", text: source.slice(start + 1, end) });
     return end + 1;
+  };
+
+  const skipLine = (start: number): number => {
+    const newline = source.indexOf("\n", start);
+    return newline === -1 ? source.length : newline + 1;
+  };
+
+  const lineStateAt = (position: number): boolean => {
+    const lineStart = source.lastIndexOf("\n", position - 1) + 1;
+    return source.slice(lineStart, position).trim().length === 0;
   };
 
   let index = 0;
@@ -520,7 +762,9 @@ function tokenizeMainLine(source: string, warnings: string[]): string[] {
 
     if (variationDepth > 0) {
       if (character === "{") {
-        index = skipBraceComment(index);
+        index = skipBraceComment(index, false);
+      } else if (character === ";") {
+        index = skipLine(index);
       } else if (character === "(") {
         variationDepth += 1;
         index += 1;
@@ -533,22 +777,39 @@ function tokenizeMainLine(source: string, warnings: string[]): string[] {
       continue;
     }
 
+    if (lineHasOnlyWhitespace) {
+      const tagEnd = tagLineEnd(source, index);
+      if (tagEnd !== null) {
+        flush();
+        index = tagEnd;
+        continue;
+      }
+    }
     if (lineHasOnlyWhitespace && character === "%") {
       flush();
-      const newline = source.indexOf("\n", index);
-      index = newline === -1 ? source.length : newline + 1;
+      index = skipLine(index);
       lineHasOnlyWhitespace = true;
       continue;
     }
     if (character === "{") {
       flush();
-      index = skipBraceComment(index);
-      lineHasOnlyWhitespace = false;
+      index = skipBraceComment(index, true);
+      lineHasOnlyWhitespace = lineStateAt(index);
       continue;
     }
     if (character === ";") {
       flush();
-      const newline = source.indexOf("\n", index);
+      const newline = source.indexOf("\n", index + 1);
+      const end = newline === -1 ? source.length : newline;
+      items.push({
+        kind: "comment",
+        text: source
+          .slice(index + 1, end)
+          .replace(/\r$/, "")
+          .replaceAll("{", "(")
+          .replaceAll("}", ")")
+          .trim(),
+      });
       index = newline === -1 ? source.length : newline + 1;
       lineHasOnlyWhitespace = true;
       continue;
@@ -578,11 +839,7 @@ function tokenizeMainLine(source: string, warnings: string[]): string[] {
 
   flush();
   if (variationDepth > 0) warnings.push("unterminated variation ignored while hydrating game");
-  return tokens;
-}
-
-function normalizeMoveToken(token: string): string {
-  return token.replace(/^\d+\.{1,3}/, "").replace(/[!?]+$/, "");
+  return items;
 }
 
 function isMoveNumber(token: string): boolean {
