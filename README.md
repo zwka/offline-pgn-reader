@@ -12,8 +12,8 @@ No cloud, no SaaS, no external assets — everything runs from this folder.
 
 - **Streaming indexer** — scans multi-hundred-MB PGN files in one pass with
   constant memory, storing byte offsets and headers in a local SQLite cache.
-  A recorded pre-cutover reference run indexed a 231 MB / 1,000,000-game file
-  in ~20 s at ~38 MB RSS.
+  The repeatable TypeScript production benchmark and the separate pre-cutover
+  Python reference run are documented in [the scan benchmark report](docs/benchmarks/typescript-scan.md).
 - **Lazy game loading** — opening a game seeks straight to its byte span;
   nothing else in the file is read.
 - **Full annotation fidelity** — brace comments (multi-line), semicolon
@@ -104,6 +104,7 @@ copy (stored in `library/`).
 | Index one or more files | `npm start -- index [--force] PATH...` |
 | Reset the index cache | `npm start -- reset` |
 | Show CLI help | `npm start -- --help` |
+| Run the production Scan benchmark | `npm run benchmark -- --games 1000000` |
 | Remove one indexed file | Library **Remove** action or `DELETE /api/files/{id}` |
 | Run the Python oracle alone | `npm run test:python` |
 

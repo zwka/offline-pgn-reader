@@ -8,3 +8,4 @@ library/
 node_modules/
 playwright-report/
 test-results/
+.benchmark-scan-*/

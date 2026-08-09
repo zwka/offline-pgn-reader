@@ -11,5 +11,5 @@
     "resolveJsonModule": true,
     "types": ["node"]
   },
-  "include": ["src/**/*.ts", "tests-ts/**/*.ts", "tests/browser/**/*.ts", "playwright.config.ts"]
+  "include": ["src/**/*.ts", "benchmarks/**/*.ts", "tests-ts/**/*.ts", "tests/browser/**/*.ts", "playwright.config.ts"]
 }
