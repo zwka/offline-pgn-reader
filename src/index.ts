@@ -3,6 +3,7 @@ import {
   LibraryDatabase,
   type SqliteConnection,
 } from "./database.js";
+import { decodeTagPairs } from "./projection.js";
 import { sourceFingerprint, sourceStats } from "./source.js";
 import {
   scanPgn,
@@ -10,7 +11,6 @@ import {
   type ScannedGame,
   type TagPair,
 } from "./scanner.js";
-import type { GamePage } from "./wire.js";
 
 const INSERT_BATCH_SIZE = 500;
 
@@ -30,7 +30,7 @@ export type IndexFile = {
   scanned_at: string | null;
 };
 
-export type IndexGame = {
+export type IndexGameRow = {
   id: number;
   file_id: number;
   idx_in_file: number;
@@ -48,10 +48,20 @@ export type IndexGame = {
   has_fen: number;
   tag_json: string;
   warning: string | null;
+};
+
+export type IndexGame = IndexGameRow & {
   file_path: string;
   file_name: string;
   file_scan_status: ScanStatus;
   file_fingerprint: string;
+};
+
+export type IndexGamePage = {
+  total: number;
+  offset: number;
+  limit: number;
+  games: IndexGameRow[];
 };
 
 export type NeighborGameIds = { prev: number | null; next: number | null };
@@ -72,7 +82,7 @@ export interface Index {
   markScanError(fileId: number, error: unknown): void;
   replaceGames(fileId: number, sourcePath: string, onProgress?: ScanProgress): Promise<void>;
 
-  listGames(fileId: number, query?: string, offset?: number, limit?: number): GamePage;
+  listGames(fileId: number, query?: string, offset?: number, limit?: number): IndexGamePage;
   getGame(gameId: number): IndexGame | undefined;
   getGameTags(gameId: number): TagPair[] | undefined;
   neighborGameIds(gameId: number): NeighborGameIds | undefined;
@@ -280,7 +290,7 @@ export class SqliteIndex implements Index {
     }
   }
 
-  listGames(fileId: number, query = "", offset = 0, limit = 100): GamePage {
+  listGames(fileId: number, query = "", offset = 0, limit = 100): IndexGamePage {
     const normalizedOffset = Math.max(0, offset);
     const normalizedLimit = Math.max(1, Math.min(limit, 500));
     const search = query.trim();
@@ -300,13 +310,13 @@ export class SqliteIndex implements Index {
         .get(...params) as { count: number }).count;
       const games = database
         .prepare(
-          `SELECT id, idx_in_file, event, site, date, round, white, black,
-             result, eco, opening, has_fen, warning,
-             offset_end - offset_start AS byte_size
+          `SELECT id, file_id, idx_in_file, offset_start, offset_end,
+             event, site, date, round, white, black, result, eco, opening,
+             has_fen, tag_json, warning
            FROM games WHERE ${whereSql}
            ORDER BY idx_in_file LIMIT ? OFFSET ?`,
         )
-        .all(...params, normalizedLimit, normalizedOffset) as GamePage["games"];
+        .all(...params, normalizedLimit, normalizedOffset) as IndexGameRow[];
       return {
         total,
         offset: normalizedOffset,
@@ -331,7 +341,7 @@ export class SqliteIndex implements Index {
   getGameTags(gameId: number): TagPair[] | undefined {
     const game = this.getGame(gameId);
     if (!game) return undefined;
-    return storedHeaders(game.tag_json) ?? [];
+    return decodeTagPairs(game.tag_json);
   }
 
   neighborGameIds(gameId: number): NeighborGameIds | undefined {
@@ -380,19 +390,4 @@ function insertBatch(
   rows: unknown[][],
 ): void {
   for (const row of rows) insert.run(row);
-}
-
-function storedHeaders(raw: string): TagPair[] | undefined {
-  try {
-    const parsed: unknown = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return undefined;
-    const headers = parsed.filter(
-      (pair): pair is [string, string] =>
-        Array.isArray(pair) && pair.length === 2 &&
-        typeof pair[0] === "string" && typeof pair[1] === "string",
-    );
-    return headers.length === parsed.length ? headers : undefined;
-  } catch {
-    return undefined;
-  }
 }

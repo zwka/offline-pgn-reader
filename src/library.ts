@@ -14,36 +14,28 @@ import { Worker } from "node:worker_threads";
 import { basename, extname, isAbsolute, join, resolve } from "node:path";
 import { homedir } from "node:os";
 
-import { IndexBusyError, type Index, type IndexFile, type IndexGame } from "./index.js";
-import { hydrateGame, HydrationError } from "./hydration.js";
+import { IndexBusyError, type Index } from "./index.js";
 import {
-  readSourceSpan,
+  NotFound,
+  ReaderProjection,
+  ServiceError,
+  type ProjectionProgress,
+} from "./projection.js";
+import {
   sourceFingerprint,
   sourceStats,
-  SourceChangedError,
-  SourceMissingError,
-  SourceSpanError,
 } from "./source.js";
-import type { TagPair } from "./scanner.js";
 import type {
   DiscoveredSource,
   FileRecord,
   GameDocument,
-  GameDocumentPayload,
   GamePage,
 } from "./wire.js";
 import type { ScanWorkerData, ScanWorkerMessage } from "./scan-worker.js";
 
 const DEFAULT_MAX_GAME_BYTES = 8 * 1024 * 1024;
 
-type FileRow = IndexFile;
-type GameDocumentRow = IndexGame;
-
-type ScanProgressState = {
-  bytesDone: number;
-  bytesTotal: number;
-  gamesFound: number;
-};
+type ScanProgressState = ProjectionProgress;
 
 type ActiveScan = {
   worker: ScanWorker;
@@ -75,26 +67,12 @@ export type LibraryServiceOptions = {
   workerFactory?: ScanWorkerFactory;
 };
 
-export class ServiceError extends Error {
-  constructor(
-    message: string,
-    public readonly statusCode: number,
-  ) {
-    super(message);
-    this.name = "ServiceError";
-  }
-}
-
-export class NotFound extends ServiceError {
-  constructor(message: string) {
-    super(message, 404);
-    this.name = "NotFound";
-  }
-}
+export { NotFound, ServiceError } from "./projection.js";
 
 export class LibraryService {
   private readonly progress = new Map<number, ScanProgressState>();
   private readonly activeScans = new Map<number, ActiveScan>();
+  private readonly projection: ReaderProjection;
 
   constructor(
     private readonly index: Index,
@@ -104,6 +82,10 @@ export class LibraryService {
     options: LibraryServiceOptions = {},
   ) {
     this.workerFactory = options.workerFactory ?? defaultScanWorker;
+    this.projection = new ReaderProjection(index, {
+      maxGameBytes,
+      progress: (fileId) => this.progress.get(fileId) ?? null,
+    });
     this.index.recoverInterruptedScans();
   }
 
@@ -138,7 +120,7 @@ export class LibraryService {
   }
 
   listFiles(): FileRecord[] {
-    return this.index.listFiles().map((source) => this.toFileRecord(source));
+    return this.projection.listFiles();
   }
 
   removeFile(fileId: number): void {
@@ -166,52 +148,27 @@ export class LibraryService {
   }
 
   getFile(fileId: number): FileRecord {
-    const source = this.index.getFile(fileId);
-    if (!source) throw new NotFound(`file ${fileId} not found`);
-    return this.toFileRecord(source);
+    return this.projection.getFile(fileId);
   }
 
   listGames(fileId: number, query = "", offset = 0, limit = 100): GamePage {
-    this.getFile(fileId);
-    return this.index.listGames(fileId, query, offset, limit);
+    return this.projection.listGames(fileId, query, offset, limit);
   }
 
-  getGameDocument(gameId: number): Omit<GameDocument, "neighbors"> {
-    const row = this.gameRowById(gameId);
-    const source = this.readGameBytes(row);
-    let hydrated: GameDocumentPayload;
-    try {
-      const extraWarnings = row.warning ? [`index warning: ${row.warning}`] : [];
-      hydrated = hydrateGame(source, this.index.getGameTags(gameId) ?? [], extraWarnings);
-    } catch (error) {
-      if (error instanceof HydrationError) {
-        throw new ServiceError(`game could not be parsed: ${error.message}`, 422);
-      }
-      throw error;
-    }
-    return {
-      ...hydrated,
-      gameId,
-      fileId: row.file_id,
-      fileName: row.file_name,
-      idxInFile: row.idx_in_file,
-    };
+  getGameDocument(gameId: number): GameDocument {
+    return this.projection.getGameDocument(gameId);
   }
 
   getGameSource(gameId: number): string {
-    const row = this.gameRowById(gameId);
-    return this.readGameBytes(row).toString("utf8");
+    return this.projection.getGameSource(gameId);
   }
 
-  getGameTags(gameId: number): TagPair[] {
-    this.gameRowById(gameId);
-    return this.index.getGameTags(gameId) ?? [];
+  getGameTags(gameId: number): ReturnType<ReaderProjection["getGameTags"]> {
+    return this.projection.getGameTags(gameId);
   }
 
-  neighborGameIds(gameId: number): { prev: number | null; next: number | null } {
-    const neighbors = this.index.neighborGameIds(gameId);
-    if (!neighbors) throw new NotFound(`game ${gameId} not found`);
-    return neighbors;
+  neighborGameIds(gameId: number): ReturnType<ReaderProjection["neighborGameIds"]> {
+    return this.projection.neighborGameIds(gameId);
   }
 
   async scanFileSync(fileId: number, force = false): Promise<FileRecord> {
@@ -403,68 +360,6 @@ export class LibraryService {
         : "cannot remove file while a scan is running",
       409,
     );
-  }
-
-  private toFileRecord(source: FileRow): FileRecord {
-    let exists = false;
-    let stale = false;
-    try {
-      sourceStats(source.path);
-      exists = true;
-      if (source.fingerprint) {
-        stale = sourceFingerprint(source.path) !== source.fingerprint;
-      }
-    } catch {
-      // A registered source can disappear after registration; keep its record readable.
-    }
-    return {
-      id: source.id,
-      path: source.path,
-      name: source.name,
-      size: source.size,
-      mtime_ns: source.mtime_ns,
-      fingerprint: source.fingerprint,
-      game_count: source.game_count,
-      warning_count: source.warning_count,
-      scan_status: source.scan_status,
-      scan_error: source.scan_error,
-      scanned_at: source.scanned_at,
-      exists,
-      stale,
-      progress: source.scan_status === "scanning"
-        ? this.progress.get(source.id) ?? null
-        : null,
-    };
-  }
-
-  private gameRowById(gameId: number): GameDocumentRow {
-    const row = this.index.getGame(gameId);
-    if (!row) throw new NotFound(`game ${gameId} not found`);
-    return row;
-  }
-
-  private readGameBytes(row: GameDocumentRow): Buffer {
-    if (row.file_scan_status !== "ready") {
-      throw new ServiceError(
-        `source index is not ready for reads: ${row.file_scan_status}`,
-        409,
-      );
-    }
-    try {
-      return readSourceSpan(
-        row.file_path,
-        row.offset_start,
-        row.offset_end,
-        this.maxGameBytes,
-        row.file_fingerprint,
-      );
-    } catch (error) {
-      if (error instanceof SourceMissingError || error instanceof SourceChangedError) {
-        throw new ServiceError(error.message, 409);
-      }
-      if (error instanceof SourceSpanError) throw new ServiceError(error.message, 422);
-      throw error;
-    }
   }
 
   private setScanError(fileId: number, error: unknown): void {

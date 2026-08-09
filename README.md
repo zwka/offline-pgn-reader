@@ -159,7 +159,8 @@ version:
 frontend/            vanilla-JS SPA (board, notation tree, library)
 frontend/pieces/     local CBurnett SVG chess pieces
 src/server.ts        Fastify routes + static hosting (production)
-src/library.ts       library ops, background scans, retrieval
+src/library.ts       library ops and background scans
+src/projection.ts    Index/GameDocument response projection
 src/scanner.ts       streaming boundary scanner (index layer, no movetext parse)
 src/hydration.ts     per-game hydration via chess.js → document model
 src/database.ts      SQLite cache (schema-versioned, WAL)

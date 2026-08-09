@@ -1,16 +1,15 @@
 import fastifyMultipart from "@fastify/multipart";
 import fastifyStatic from "@fastify/static";
 import { Type } from "@sinclair/typebox";
-import { Value } from "@sinclair/typebox/value";
 import Fastify, { type FastifyInstance } from "fastify";
 
 import { config as defaultConfig, type AppConfig } from "./config.js";
 import { createSqliteProbe } from "./database.js";
 import { SqliteIndex } from "./index.js";
-import { LibraryService, ServiceError } from "./library.js";
+import { LibraryService } from "./library.js";
+import { NotFound, projectErrorResponse, ServiceError } from "./projection.js";
 import {
   DiscoveredSourceSchema,
-  ErrorResponseSchema,
   FileRecordSchema,
   GameDocumentSchema,
   GamePageSchema,
@@ -18,17 +17,12 @@ import {
   RegisterFileRequestSchema,
   ResetResponseSchema,
   TagPairsSchema,
-  type ErrorResponse,
   type RegisterFileRequest,
 } from "./wire.js";
 
 export type ServerOptions = Partial<AppConfig> & {
   databaseProbe?: () => boolean | Promise<boolean>;
 };
-
-function errorResponse(detail: string): ErrorResponse {
-  return Value.Parse(ErrorResponseSchema, { detail });
-}
 
 export function buildServer(options: ServerOptions = {}): FastifyInstance {
   const { databaseProbe, ...configOverrides } = options;
@@ -205,10 +199,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
         response: { 200: GameDocumentSchema },
       },
     },
-    async (request) => ({
-      ...library.getGameDocument(Number(request.params.gameId)),
-      neighbors: library.neighborGameIds(Number(request.params.gameId)),
-    }),
+    async (request) => library.getGameDocument(Number(request.params.gameId)),
   );
 
   app.get<{ Params: { gameId: string } }>(
@@ -235,29 +226,14 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     async (request) => library.getGameTags(Number(request.params.gameId)),
   );
 
-  app.setNotFoundHandler(async (_request, reply) =>
-    reply.code(404).send(errorResponse("Not Found")),
-  );
+  app.setNotFoundHandler(async (_request, reply) => {
+    const projected = projectErrorResponse(new NotFound("Not Found"));
+    return reply.code(projected.statusCode).send(projected.body);
+  });
 
   app.setErrorHandler(async (error, _request, reply) => {
-    if (error instanceof ServiceError) {
-      return reply.code(error.statusCode).send(errorResponse(error.message));
-    }
-    const statusCode =
-      typeof error === "object" &&
-      error !== null &&
-      "statusCode" in error &&
-      typeof error.statusCode === "number" &&
-      error.statusCode >= 400
-        ? error.statusCode
-        : 500;
-    const detail =
-      statusCode >= 500
-        ? "Internal Server Error"
-        : error instanceof Error
-          ? error.message
-          : "Request failed";
-    return reply.code(statusCode).send(errorResponse(detail));
+    const projected = projectErrorResponse(error);
+    return reply.code(projected.statusCode).send(projected.body);
   });
 
   return app;

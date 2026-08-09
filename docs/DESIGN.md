@@ -70,6 +70,8 @@ variations, and `[FEN]/[SetUp]` starting positions. The tree is converted iterat
 below. `pgnreader/parser.py` provides the same operation through python-chess for rollback and
 parity checks.
 
+**Layer C — reader projection (`src/projection.ts`), response time.** The projection owns the translation from stored Index rows and hydrated payloads to wire responses: source records, Game records, document identity, ordered Tag pairs, neighboring game ids, source text, and shared error envelopes. Library operations delegate these reads to the projection, while the HTTP server only adapts route parameters and response schemas.
+
 **Known fidelity limits (documented not hidden):** multiple consecutive brace comments on one move
 are merged into one comment string; `;` comments are folded into brace-style comments; escape lines
 (`%`) are dropped from the parsed model. `[%cal]` arrows and `[%csl]` highlights are extracted
