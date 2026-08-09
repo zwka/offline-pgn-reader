@@ -32,6 +32,7 @@ import type {
   GameDocumentPayload,
   GamePage,
 } from "./wire.js";
+import type { ScanWorkerData, ScanWorkerMessage } from "./scan-worker.js";
 
 const DEFAULT_MAX_GAME_BYTES = 8 * 1024 * 1024;
 
@@ -45,15 +46,34 @@ type ScanProgressState = {
 };
 
 type ActiveScan = {
-  worker: Worker;
+  worker: ScanWorker;
   progress: ScanProgressState;
   finished: boolean;
+  resolve: () => void;
 };
 
-type ScanWorkerMessage =
-  | { type: "progress"; bytesDone: number; bytesTotal: number; gamesFound: number }
-  | { type: "complete" }
-  | { type: "error"; error: string };
+type ScanPreparation = {
+  file: FileRecord;
+  progress: ScanProgressState;
+};
+
+type ScanPreparationResult =
+  | { kind: "started"; scan: ScanPreparation }
+  | { kind: "skipped"; file: FileRecord }
+  | { kind: "duplicate"; file: FileRecord };
+
+export type ScanWorker = {
+  on(event: "message", listener: (message: ScanWorkerMessage) => void): ScanWorker;
+  on(event: "error", listener: (error: Error) => void): ScanWorker;
+  on(event: "exit", listener: (code: number) => void): ScanWorker;
+  terminate(): Promise<number>;
+};
+
+export type ScanWorkerFactory = (data: ScanWorkerData) => ScanWorker;
+
+export type LibraryServiceOptions = {
+  workerFactory?: ScanWorkerFactory;
+};
 
 export class ServiceError extends Error {
   constructor(
@@ -81,9 +101,13 @@ export class LibraryService {
     private readonly watchDirs: string[],
     private readonly uploadDir: string,
     private readonly maxGameBytes = DEFAULT_MAX_GAME_BYTES,
+    options: LibraryServiceOptions = {},
   ) {
+    this.workerFactory = options.workerFactory ?? defaultScanWorker;
     this.index.recoverInterruptedScans();
   }
+
+  private readonly workerFactory: ScanWorkerFactory;
 
   registerFile(rawPath: string, scan = true): FileRecord {
     const sourcePath = canonicalSourcePath(rawPath);
@@ -119,6 +143,8 @@ export class LibraryService {
 
   removeFile(fileId: number): void {
     this.getFile(fileId);
+    this.reapFinishedScans(fileId);
+    this.assertNoActiveScan(fileId);
     let deleted: boolean;
     try {
       deleted = this.index.deleteFile(fileId);
@@ -129,6 +155,8 @@ export class LibraryService {
   }
 
   resetIndex(): void {
+    this.reapFinishedScans();
+    this.assertNoActiveScan();
     try {
       this.index.reset();
     } catch (error) {
@@ -187,135 +215,20 @@ export class LibraryService {
   }
 
   async scanFileSync(fileId: number, force = false): Promise<FileRecord> {
-    const file = this.getFile(fileId);
-    const activeScan = this.activeScans.get(fileId);
-    if (activeScan && file.scan_status !== "ready") {
-      throw new ServiceError("scan already in progress", 409);
-    }
-    if (file.scan_status === "scanning") {
+    const result = this.prepareScan(fileId, force);
+    if (result.kind === "skipped") return result.file;
+    if (result.kind === "duplicate") {
       throw new ServiceError("scan already in progress", 409);
     }
 
-    if (!force && file.scan_status === "ready") {
-      try {
-        if (sourceFingerprint(file.path) === file.fingerprint) return file;
-      } catch {
-        throw new ServiceError(`source file missing: ${file.path}`, 409);
-      }
-    }
-
-    if (activeScan) {
-      activeScan.finished = true;
-      this.activeScans.delete(fileId);
-      this.progress.delete(fileId);
-    }
-
-    let bytesTotal: number;
-    try {
-      bytesTotal = sourceStats(file.path).size;
-    } catch {
-      throw new ServiceError(`source file missing: ${file.path}`, 409);
-    }
-
-    const claimed = this.index.claimScan(fileId);
-    if (!claimed) throw new ServiceError("scan already in progress", 409);
-
-    const progress: ScanProgressState = { bytesDone: 0, bytesTotal, gamesFound: 0 };
-    this.progress.set(fileId, progress);
-    try {
-      await this.index.replaceGames(
-        fileId,
-        file.path,
-        (bytesDone, total, gamesFound) => {
-          progress.bytesDone = bytesDone;
-          progress.bytesTotal = total;
-          progress.gamesFound = gamesFound;
-        },
-      );
-    } catch (error) {
-      this.setScanError(fileId, error);
-    } finally {
-      this.progress.delete(fileId);
-    }
+    await this.launchScan(result.scan);
     return this.getFile(fileId);
   }
 
   startScan(fileId: number, force = false): boolean {
-    const file = this.getFile(fileId);
-    const activeScan = this.activeScans.get(fileId);
-    if (activeScan && file.scan_status !== "ready") return false;
-    if (file.scan_status === "scanning") return false;
-
-    if (!force && file.scan_status === "ready") {
-      try {
-        if (sourceFingerprint(file.path) === file.fingerprint) return false;
-      } catch {
-        throw new ServiceError(`source file missing: ${file.path}`, 409);
-      }
-    }
-
-    // The worker commits `ready` before its completion message reaches this
-    // thread. Retire that completed worker so an immediate forced re-scan is
-    // not mistaken for a duplicate request.
-    if (activeScan) {
-      activeScan.finished = true;
-      this.activeScans.delete(fileId);
-      this.progress.delete(fileId);
-    }
-
-    let bytesTotal: number;
-    try {
-      bytesTotal = sourceStats(file.path).size;
-    } catch {
-      throw new ServiceError(`source file missing: ${file.path}`, 409);
-    }
-
-    const progress: ScanProgressState = { bytesDone: 0, bytesTotal, gamesFound: 0 };
-    const claimed = this.index.claimScan(fileId);
-    if (!claimed) return false;
-    this.progress.set(fileId, progress);
-
-    let worker: Worker;
-    try {
-      worker = new Worker(new URL("./scan-worker.ts", import.meta.url), {
-        workerData: {
-          dbPath: this.index.path,
-          fileId,
-          sourcePath: file.path,
-        },
-        execArgv: workerExecArgv(),
-      });
-    } catch (error) {
-      this.progress.delete(fileId);
-      this.setScanError(fileId, error);
-      throw error;
-    }
-
-    const state: ActiveScan = { worker, progress, finished: false };
-    this.activeScans.set(fileId, state);
-    const finish = (error?: unknown) => {
-      if (state.finished) return;
-      state.finished = true;
-      this.activeScans.delete(fileId);
-      this.progress.delete(fileId);
-      if (error) this.setScanError(fileId, error);
-    };
-    worker.on("message", (message: ScanWorkerMessage) => {
-      if (state.finished) return;
-      if (message.type === "progress") {
-        state.progress.bytesDone = message.bytesDone;
-        state.progress.bytesTotal = message.bytesTotal;
-        state.progress.gamesFound = message.gamesFound;
-      } else if (message.type === "complete") {
-        finish();
-      } else if (message.type === "error") {
-        finish(message.error);
-      }
-    });
-    worker.on("error", (error) => finish(error));
-    worker.on("exit", (code) => {
-      if (code !== 0) finish(new Error(`scan worker exited with code ${code}`));
-    });
+    const result = this.prepareScan(fileId, force);
+    if (result.kind !== "started") return false;
+    void this.launchScan(result.scan);
     return true;
   }
 
@@ -325,6 +238,8 @@ export class LibraryService {
     this.activeScans.clear();
     this.progress.clear();
     await Promise.allSettled(scans.map((scan) => scan.worker.terminate()));
+    this.index.recoverInterruptedScans();
+    for (const scan of scans) scan.resolve();
   }
 
   discover(): DiscoveredSource[] {
@@ -360,6 +275,134 @@ export class LibraryService {
       }
     }
     return discovered;
+  }
+
+  private prepareScan(fileId: number, force: boolean): ScanPreparationResult {
+    this.reapFinishedScans(fileId);
+    const file = this.getFile(fileId);
+    if (this.activeScans.has(fileId) || file.scan_status === "scanning") {
+      return { kind: "duplicate", file };
+    }
+
+    if (!force && file.scan_status === "ready") {
+      try {
+        if (sourceFingerprint(file.path) === file.fingerprint) {
+          return { kind: "skipped", file };
+        }
+      } catch {
+        throw new ServiceError(`source file missing: ${file.path}`, 409);
+      }
+    }
+
+    let bytesTotal: number;
+    try {
+      bytesTotal = sourceStats(file.path).size;
+    } catch {
+      throw new ServiceError(`source file missing: ${file.path}`, 409);
+    }
+
+    if (!this.index.claimScan(fileId)) {
+      return { kind: "duplicate", file };
+    }
+
+    const progress: ScanProgressState = { bytesDone: 0, bytesTotal, gamesFound: 0 };
+    this.progress.set(fileId, progress);
+    return { kind: "started", scan: { file, progress } };
+  }
+
+  private launchScan(scan: ScanPreparation): Promise<void> {
+    let worker: ScanWorker;
+    try {
+      worker = this.workerFactory({
+        dbPath: this.index.path,
+        fileId: scan.file.id,
+        sourcePath: scan.file.path,
+      });
+    } catch (error) {
+      this.progress.delete(scan.file.id);
+      this.setScanError(scan.file.id, error);
+      throw error;
+    }
+
+    return new Promise<void>((resolve) => {
+      const state: ActiveScan = {
+        worker,
+        progress: scan.progress,
+        finished: false,
+        resolve,
+      };
+      this.activeScans.set(scan.file.id, state);
+
+      const finish = (error?: unknown): void => {
+        if (state.finished) return;
+        state.finished = true;
+        const isCurrent = this.activeScans.get(scan.file.id) === state;
+        if (isCurrent) {
+          this.activeScans.delete(scan.file.id);
+          this.progress.delete(scan.file.id);
+          if (error !== undefined) this.setScanError(scan.file.id, error);
+        }
+        state.resolve();
+      };
+
+      try {
+        worker.on("message", (message) => {
+          if (state.finished) return;
+          if (message.type === "progress") {
+            state.progress.bytesDone = message.bytesDone;
+            state.progress.bytesTotal = message.bytesTotal;
+            state.progress.gamesFound = message.gamesFound;
+          } else if (message.type === "complete") {
+            finish();
+          } else {
+            finish(message.error);
+          }
+        });
+        worker.on("error", (error) => finish(error));
+        worker.on("exit", (code) => {
+          if (code !== 0) finish(new Error(`scan worker exited with code ${code}`));
+          else if (!state.finished) finish(new Error("scan worker exited before completion"));
+        });
+      } catch (error) {
+        finish(error);
+      }
+    });
+  }
+
+  private reapFinishedScans(fileId?: number): void {
+    const scans = fileId === undefined
+      ? [...this.activeScans.entries()]
+      : [[fileId, this.activeScans.get(fileId)] as const];
+    for (const [id, scan] of scans) {
+      if (!scan) continue;
+      const file = this.index.getFile(id);
+      if (file && file.scan_status === "scanning") continue;
+      this.retireScan(id, scan);
+    }
+  }
+
+  private retireScan(fileId: number, scan: ActiveScan): void {
+    scan.finished = true;
+    if (this.activeScans.get(fileId) === scan) {
+      this.activeScans.delete(fileId);
+      this.progress.delete(fileId);
+    }
+    scan.resolve();
+    try {
+      void scan.worker.terminate().catch(() => undefined);
+    } catch {
+      // The worker has already exited; its state is retired either way.
+    }
+  }
+
+  private assertNoActiveScan(fileId?: number): void {
+    if (!this.index.hasActiveScan(fileId)) return;
+    throw new ServiceError(
+      fileId === undefined
+        ? "cannot reset while a scan is running"
+        : "cannot remove file while a scan is running",
+      409,
+    );
   }
 
   private toFileRecord(source: FileRow): FileRecord {
@@ -433,6 +476,13 @@ function indexError(error: unknown): unknown {
   return error instanceof IndexBusyError
     ? new ServiceError(error.message, 409)
     : error;
+}
+
+function defaultScanWorker(data: ScanWorkerData): ScanWorker {
+  return new Worker(new URL("./scan-worker.ts", import.meta.url), {
+    workerData: data,
+    execArgv: workerExecArgv(),
+  }) as unknown as ScanWorker;
 }
 
 function canonicalSourcePath(rawPath: string): string {

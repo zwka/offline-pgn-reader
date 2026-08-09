@@ -2,7 +2,7 @@ import { parentPort, workerData } from "node:worker_threads";
 
 import { SqliteIndex } from "./index.js";
 
-type ScanWorkerData = {
+export type ScanWorkerData = {
   dbPath: string;
   fileId: number;
   sourcePath: string;
@@ -24,7 +24,7 @@ type ErrorMessage = {
   error: string;
 };
 
-type ScanWorkerMessage = ProgressMessage | CompleteMessage | ErrorMessage;
+export type ScanWorkerMessage = ProgressMessage | CompleteMessage | ErrorMessage;
 
 const scanData = workerData as ScanWorkerData;
 
@@ -48,4 +48,5 @@ async function run(): Promise<void> {
 
 run().catch((error: unknown) => {
   post({ type: "error", error: error instanceof Error ? error.message : String(error) });
+  process.exitCode = 1;
 });
