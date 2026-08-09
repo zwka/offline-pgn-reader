@@ -1,5 +1,4 @@
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { spawnSync } from "node:child_process";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -11,8 +10,11 @@ import type { GameDocument } from "../src/wire.js";
 import { scanPgn } from "../src/scanner.js";
 
 const fixtureRoot = resolve("tests/fixtures");
-const manifestPath = join(fixtureRoot, "parity_manifest.json");
-const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as { sources: string[] };
+const manifestPath = join(fixtureRoot, "contract_manifest.json");
+const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as ContractManifest;
+const wireContract = JSON.parse(
+  readFileSync(join(fixtureRoot, "wire_contract.json"), "utf8"),
+) as { healthOk: Record<string, unknown>; notFound: Record<string, unknown> };
 const errorContract = JSON.parse(
   readFileSync(join(fixtureRoot, "error_contract.json"), "utf8"),
 ) as Record<string, { status: number; body: Record<string, string> }>;
@@ -26,12 +28,11 @@ afterEach(async () => {
   });
 });
 
-describe("Python and TypeScript compatibility", () => {
+describe("TypeScript behavior contracts", () => {
   it("matches shared source, SQLite, wire, and document fixtures", async () => {
-    const directory = mkdtempSync(join(tmpdir(), "offline-pgn-reader-parity-"));
+    const directory = mkdtempSync(join(tmpdir(), "offline-pgn-reader-contracts-"));
     testDirectories.push(directory);
     const typeScriptDataDir = join(directory, "typescript");
-    const pythonDataDir = join(directory, "python");
     const typeScriptDbPath = join(typeScriptDataDir, "index.sqlite3");
     const server = buildServer({
       dbPath: typeScriptDbPath,
@@ -41,27 +42,125 @@ describe("Python and TypeScript compatibility", () => {
     servers.push(server);
 
     const typeScriptSnapshot = await snapshotTypeScript(server, typeScriptDbPath);
-    const pythonSnapshot = runPythonOracle(pythonDataDir);
-
-    expect(typeScriptSnapshot).toEqual(pythonSnapshot);
     expect(typeScriptSnapshot.database.schemaVersion).toBe(1);
-    expect(typeScriptSnapshot.wire.health).toEqual({
-      status: 200,
-      body: { status: "ok", version: "1.1.0", db: true },
-    });
+    expect(typeScriptSnapshot.wire.health).toEqual({ status: 200, body: wireContract.healthOk });
+    expect(typeScriptSnapshot.wire.notFound).toEqual({ status: 404, body: wireContract.notFound });
     for (const [name, expected] of Object.entries(errorContract)) {
       expect(typeScriptSnapshot.errors[name]).toEqual(expected);
     }
+    expect(typeScriptSnapshot.database.tables).toEqual(["files", "games", "meta"]);
+    expect(typeScriptSnapshot.database.columns).toEqual({
+      files: [
+        "id",
+        "path",
+        "name",
+        "size",
+        "mtime_ns",
+        "fingerprint",
+        "game_count",
+        "warning_count",
+        "scan_status",
+        "scan_error",
+        "scanned_at",
+      ],
+      games: [
+        "id",
+        "file_id",
+        "idx_in_file",
+        "offset_start",
+        "offset_end",
+        "event",
+        "site",
+        "date",
+        "round",
+        "white",
+        "black",
+        "result",
+        "eco",
+        "opening",
+        "has_fen",
+        "tag_json",
+        "warning",
+      ],
+      meta: ["key", "value"],
+    });
+    expect(typeScriptSnapshot.sources).toHaveLength(manifest.sources.length);
+    expect(typeScriptSnapshot.files).toEqual(
+      manifest.sources.map((expected, index) => expect.objectContaining({
+        id: index + 1,
+        name: expected.name,
+        game_count: expected.games.length,
+        warning_count: expected.games.filter(({ warning }) => warning !== null).length,
+        scan_status: "ready",
+        stale: false,
+      })),
+    );
+    for (const [index, source] of typeScriptSnapshot.sources.entries()) {
+      const expected = manifest.sources[index];
+      const expectedSourceText = expected.games.map((game) => readFileSync(
+        resolve(fixtureRoot, expected.name),
+      ).subarray(game.offsetStart, game.offsetEnd).toString("utf8"));
+
+      expect(source.scan).toEqual(expected.games);
+      expect(source.file).toMatchObject({
+        name: expected.name,
+        game_count: expected.games.length,
+        warning_count: expected.games.filter(({ warning }) => warning !== null).length,
+        scan_status: "ready",
+        stale: false,
+      });
+      expect(source.page).toMatchObject({
+        total: expected.games.length,
+        offset: 0,
+        limit: 500,
+      });
+      expect(source.page.games).toEqual(expected.games.map((game) => expect.objectContaining({
+        idx_in_file: game.idxInFile,
+        event: headerValue(game.headers, "Event"),
+        site: headerValue(game.headers, "Site"),
+        date: headerValue(game.headers, "Date"),
+        round: headerValue(game.headers, "Round"),
+        white: headerValue(game.headers, "White"),
+        black: headerValue(game.headers, "Black"),
+        result: headerValue(game.headers, "Result"),
+        warning: game.warning,
+      })));
+      expect(source.documents.map(({ headers }) => headers)).toEqual(
+        expected.games.map(({ headers }) => headers),
+      );
+      expect(source.documents.map(({ source: documentSource }) => documentSource)).toEqual(
+        expectedSourceText,
+      );
+      expect(source.tags).toEqual(expected.games.map(({ headers }) => headers));
+      expect(source.sources).toEqual(expectedSourceText);
+    }
+    expect(typeScriptSnapshot.database.games).toEqual(
+      manifest.sources.flatMap((source) => source.games.map((game) => expect.objectContaining({
+        idx_in_file: game.idxInFile,
+        offset_start: game.offsetStart,
+        offset_end: game.offsetEnd,
+        event: headerValue(game.headers, "Event"),
+        site: headerValue(game.headers, "Site"),
+        date: headerValue(game.headers, "Date"),
+        round: headerValue(game.headers, "Round"),
+        white: headerValue(game.headers, "White"),
+        black: headerValue(game.headers, "Black"),
+        result: headerValue(game.headers, "Result"),
+        has_fen: headerValue(game.headers, "FEN") === "" ? 0 : 1,
+        tag_json: game.headers,
+        warning: game.warning,
+      }))),
+    );
   }, 30_000);
 });
 
 async function snapshotTypeScript(
   server: ReturnType<typeof buildServer>,
   dbPath: string,
-): Promise<ParitySnapshot> {
+): Promise<ContractSnapshot> {
   const sources: SourceSnapshot[] = [];
-  for (const name of manifest.sources) {
-    sources.push(await snapshotSource(server, resolve(fixtureRoot, name), name));
+  for (const source of manifest.sources) {
+    sources.push(await snapshotSource(server, resolve(fixtureRoot, source.name), source.name));
   }
 
   return {
@@ -108,7 +207,7 @@ async function snapshotSource(
     url: `/api/files/${fileId}/games?limit=500`,
   });
   expect(pageResponse.statusCode).toBe(200);
-  const page = pageResponse.json();
+  const page = pageResponse.json() as GamePageSnapshot;
   const documents: GameDocument[] = [];
   const tags: unknown[] = [];
   const sources: string[] = [];
@@ -158,34 +257,6 @@ async function waitForReady(
     await new Promise((resolveTimer) => setTimeout(resolveTimer, 10));
   }
   throw new Error(`TypeScript scan did not finish for file ${fileId}`);
-}
-
-function runPythonOracle(dataDir: string): ParitySnapshot {
-  const python = process.env.PGNREADER_PYTHON ?? ".venv/bin/python";
-  const result = spawnSync(
-    python,
-    [
-      "tests/parity_oracle.py",
-      "--fixture-root",
-      fixtureRoot,
-      "--manifest",
-      manifestPath,
-      "--data-dir",
-      dataDir,
-    ],
-    {
-      cwd: process.cwd(),
-      encoding: "utf8",
-      env: { ...process.env, PYTHONPATH: process.cwd() },
-      maxBuffer: 20 * 1024 * 1024,
-    },
-  );
-  if (result.status !== 0) {
-    throw new Error(
-      `Python parity oracle failed (status ${result.status}):\n${result.stderr}\n${result.stdout}`,
-    );
-  }
-  return JSON.parse(result.stdout) as ParitySnapshot;
 }
 
 function fileContract(record: Record<string, unknown>): Record<string, unknown> {
@@ -290,7 +361,7 @@ type SourceSnapshot = {
   name: string;
   scan: ScanRecord[];
   file: Record<string, unknown>;
-  page: Record<string, unknown>;
+  page: GamePageSnapshot;
   documents: GameDocument[];
   tags: unknown[];
   sources: string[];
@@ -309,7 +380,7 @@ type DatabaseSnapshot = {
   games: unknown[];
 };
 
-type ParitySnapshot = {
+type ContractSnapshot = {
   wire: {
     health: JsonResponse;
     notFound: JsonResponse;
@@ -319,3 +390,21 @@ type ParitySnapshot = {
   sources: SourceSnapshot[];
   database: DatabaseSnapshot;
 };
+
+type ContractManifest = {
+  sources: Array<{
+    name: string;
+    games: ScanRecord[];
+  }>;
+};
+
+type GamePageSnapshot = {
+  total: number;
+  offset: number;
+  limit: number;
+  games: Array<Record<string, unknown>>;
+};
+
+function headerValue(headers: Array<[string, string]>, name: string): string {
+  return [...headers].reverse().find(([key]) => key === name)?.[1] ?? "";
+}

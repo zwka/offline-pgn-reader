@@ -65,7 +65,7 @@ function corpusSource(corpusCase: ScanCorpusCase): string {
 }
 
 describe("PGN source scanner", () => {
-  it("matches the shared Python scan contract", async () => {
+  it("matches the shared scan contract", async () => {
     const games = await scan(join(fixtureDirectory, scanContract.source));
 
     expect(games).toEqual(scanContract.games);

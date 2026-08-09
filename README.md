@@ -2,9 +2,8 @@
 
 A fully offline PGN reader and study interface: Node.js/TypeScript runtime +
 browser UI, built for reading large, heavily annotated PGN files (Chessable-style
-course exports, game collections, opening files) on a normal laptop. The Python
-runtime remains available only as the documented rollback path and test oracle.
-No cloud, no SaaS, no external assets — everything runs from this folder.
+course exports, game collections, opening files) on a normal laptop. No cloud, no
+SaaS, no external assets — everything runs from this folder.
 
 ![stack](https://img.shields.io/badge/stack-Node%2FTypeScript%20%2B%20SQLite%20%2B%20vanilla%20JS-334)
 
@@ -12,8 +11,7 @@ No cloud, no SaaS, no external assets — everything runs from this folder.
 
 - **Streaming indexer** — scans multi-hundred-MB PGN files in one pass with
   bounded memory, storing byte offsets and headers in a local SQLite cache.
-  The repeatable TypeScript production benchmark and the separate pre-cutover
-  Python reference run are documented in [the scan benchmark report](docs/benchmarks/typescript-scan.md).
+  The repeatable TypeScript production benchmark is documented in [the scan benchmark report](docs/benchmarks/typescript-scan.md).
 - **Lazy game loading** — opening a game reads the indexed byte span plus
   bounded fingerprint samples; it never scans the full source.
 - **Full annotation fidelity** — brace comments (multi-line), semicolon
@@ -36,7 +34,6 @@ No cloud, no SaaS, no external assets — everything runs from this folder.
 
 - Node.js 24.11.1 and npm 11.6.0 for the documented setup (see `.nvmrc`; the
   package accepts Node.js `>=22.14.0 <27`)
-- Python 3.11+ (tested on 3.14) for rollback and the oracle test suite
 - A Chromium-based browser; Playwright Chromium is used by the automated checks
 
 ## Setup (one time)
@@ -47,13 +44,6 @@ Install the production Node.js runtime:
 cd offline-pgn-reader
 nvm use
 npm install
-```
-
-Set up the optional Python rollback runtime and test oracle:
-
-```bash
-python3 -m venv .venv
-.venv/bin/pip install -r requirements.txt
 ```
 
 Everything after this point is fully offline.
@@ -67,29 +57,20 @@ npm start
 # → http://127.0.0.1:8642
 ```
 
-For local development, `npm run dev` starts the same TypeScript process. The
-Python application is not part of the production startup path. It remains an
-optional rollback runtime and compatibility oracle. Run it with its own port
-and data directory so it cannot share the production cache:
-
-```bash
-PGNREADER_DATA_DIR=./data-python PGNREADER_PORT=8643 .venv/bin/python -m pgnreader serve
-```
-
-TypeScript checks, the Python oracle, cross-runtime parity, and browser
-verification are available together. Install the Playwright browser once:
+For local development, `npm run dev` starts the same TypeScript process. TypeScript
+checks, behavior contracts, and browser verification are available together.
+Install the Playwright browser once:
 
 ```bash
 npm run typecheck
 npm test
-npm run test:python
-npm run test:parity
+npm run test:contracts
 npx playwright install chromium
 npm run test:browser
 ```
 
-`npm run test:all` runs type checking, Vitest, the Python oracle, parity checks,
-and Playwright in one command. The browser command starts an isolated Node
+`npm run test:all` runs type checking, Vitest, behavior contracts, and Playwright
+in one command. The browser command starts an isolated Node
 server automatically; it does not use the default `data/` cache.
 
 Files in `samples/` and `library/` are auto-discovered on the Library page —
@@ -107,7 +88,7 @@ copy (stored in `library/`).
 | Show CLI help | `npm start -- --help` |
 | Run the production Scan benchmark | `npm run benchmark -- --games 1000000` |
 | Remove one indexed file | Library **Remove** action or `DELETE /api/files/{id}` |
-| Run the Python oracle alone | `npm run test:python` |
+| Run behavior contracts alone | `npm run test:contracts` |
 
 Running `npm start` with no subcommand uses the configured host and port. The
 CLI `index` command skips an unchanged ready file; `--force` replaces its
@@ -134,12 +115,10 @@ Environment variables (all optional):
 | `PGNREADER_DEBUG` | off | verbose console logging (`1`, `true`, or `yes`) |
 | `PGNREADER_MAX_GAME_BYTES` | 8 MiB | per-game hydration safety cap |
 
-`PGNREADER_*` values are consumed by both runtimes. The Node.js process is the
-production owner of the database and browser routes; Python must use a separate
-data directory (and normally a separate port) when it is run as the rollback or
-oracle process. Relative paths resolve from the project root; `~` and absolute
-paths are supported. `PGNREADER_WATCH_DIRS` uses `:` on macOS/Linux and `;` on
-Windows.
+`PGNREADER_*` values are consumed by the Node.js process, which owns the database
+and browser routes. Relative paths resolve from the project root; `~` and
+absolute paths are supported. `PGNREADER_WATCH_DIRS` uses `:` on macOS/Linux and
+`;` on Windows.
 
 ## Data & backup
 
@@ -147,8 +126,7 @@ Windows.
 your PGN sources are never modified. Back up your PGN files; the index can
 always be rebuilt (`reset` + re-index). The schema is versioned; upgrades
 that change it rebuild the cache automatically. The TypeScript server logs to
-the console; the optional Python runtime also writes its rotating
-`pgnreader.log` inside its selected data directory.
+the console.
 
 ## Architecture
 
@@ -159,7 +137,7 @@ version:
 ```
 frontend/            vanilla-JS SPA (board, notation tree, library)
 frontend/pieces/     local CBurnett SVG chess pieces
-src/server.ts        Fastify routes + static hosting (production)
+src/server.ts        Fastify routes + static hosting
 src/library.ts       Library intake and Scan lifecycle
 src/scan-worker.ts   narrow worker adapter for background scans
 src/index.ts         Index persistence, replacement, reset, and status
@@ -168,9 +146,8 @@ src/projection.ts    Index/GameDocument response projection + errors
 src/scanner.ts       streaming boundary scanner (index layer, no movetext parse)
 src/hydration.ts     per-game hydration via chess.js → document model
 src/database.ts      SQLite schema and connection lifecycle (WAL)
-pgnreader/           Python rollback runtime and oracle implementation
-tests/               Python oracle and shared regression fixtures
-tests-ts/             TypeScript and cross-runtime parity tests
+tests/               shared PGN source and contract fixtures
+tests-ts/             TypeScript behavior and integration tests
 ```
 
 ## Known limitations

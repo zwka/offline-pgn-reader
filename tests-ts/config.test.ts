@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 import { readConfig } from "../src/config.js";
 
 describe("local process configuration", () => {
-  it("expands a home-relative data directory like the Python runtime", () => {
+  it("expands a home-relative data directory consistently", () => {
     const configured = readConfig({
       PGNREADER_DATA_DIR: "~/offline-pgn-reader-data",
       PGNREADER_HOST: "0.0.0.0",
@@ -35,7 +35,7 @@ describe("local process configuration", () => {
     expect(configured.uploadDir).toBe(join(homedir(), "pgn-library"));
   });
 
-  it("keeps debug and hydration limits configurable like Python", () => {
+  it("keeps debug and hydration limits configurable", () => {
     const configured = readConfig({
       PGNREADER_DEBUG: "yes",
       PGNREADER_MAX_GAME_BYTES: "4096",

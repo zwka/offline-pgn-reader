@@ -1,0 +1,159 @@
+{
+  "sources": [
+    {
+      "name": "annotations.pgn",
+      "games": [
+        {
+          "idxInFile": 0,
+          "offsetStart": 0,
+          "offsetEnd": 290,
+          "headers": [["Event", "Annotated"], ["Site", "?"], ["Date", "????.??.??"], ["Round", "?"], ["White", "Annotator"], ["Black", "Reader"], ["Result", "*"]],
+          "warning": null
+        }
+      ]
+    },
+    {
+      "name": "basic_two_games.pgn",
+      "games": [
+        {
+          "idxInFile": 0,
+          "offsetStart": 0,
+          "offsetEnd": 214,
+          "headers": [["Event", "Test Open"], ["Site", "Localville"], ["Date", "2024.01.15"], ["Round", "1"], ["White", "Alpha, A."], ["Black", "Beta, B."], ["Result", "1-0"], ["ECO", "C50"]],
+          "warning": null
+        },
+        {
+          "idxInFile": 1,
+          "offsetStart": 216,
+          "offsetEnd": 394,
+          "headers": [["Event", "Test Open"], ["Site", "Localville"], ["Date", "2024.01.16"], ["Round", "2"], ["White", "Beta, B."], ["Black", "Alpha, A."], ["Result", "1/2-1/2"]],
+          "warning": null
+        }
+      ]
+    },
+    {
+      "name": "comment_trap.pgn",
+      "games": [
+        {
+          "idxInFile": 0,
+          "offsetStart": 0,
+          "offsetEnd": 226,
+          "headers": [["Event", "Trap A"], ["Site", "?"], ["Date", "????.??.??"], ["Round", "?"], ["White", "Comment"], ["Black", "Trap"], ["Result", "*"]],
+          "warning": null
+        },
+        {
+          "idxInFile": 1,
+          "offsetStart": 228,
+          "offsetEnd": 347,
+          "headers": [["Event", "Trap B"], ["Site", "?"], ["Date", "????.??.??"], ["Round", "?"], ["White", "After"], ["Black", "Trap"], ["Result", "*"]],
+          "warning": null
+        }
+      ]
+    },
+    {
+      "name": "duplicate_tags.pgn",
+      "games": [
+        {
+          "idxInFile": 0,
+          "offsetStart": 0,
+          "offsetEnd": 128,
+          "headers": [["Event", "First event"], ["Event", "Second event"], ["White", "First white"], ["White", "Second white"], ["Note", "deja vu"], ["Result", "*"]],
+          "warning": null
+        }
+      ]
+    },
+    {
+      "name": "escape_lines.pgn",
+      "games": [
+        {
+          "idxInFile": 0,
+          "offsetStart": 44,
+          "offsetEnd": 204,
+          "headers": [["Event", "Escaped"], ["Site", "?"], ["Date", "????.??.??"], ["Round", "?"], ["White", "Percent"], ["Black", "Line"], ["Result", "*"]],
+          "warning": null
+        }
+      ]
+    },
+    {
+      "name": "fen_start.pgn",
+      "games": [
+        {
+          "idxInFile": 0,
+          "offsetStart": 0,
+          "offsetEnd": 207,
+          "headers": [["Event", "Endgame Study"], ["Site", "?"], ["Date", "????.??.??"], ["Round", "?"], ["White", "Lucena"], ["Black", "Position"], ["Result", "1-0"], ["SetUp", "1"], ["FEN", "1k6/1P3R2/8/8/8/8/r7/2K5 w - - 0 1"]],
+          "warning": null
+        }
+      ]
+    },
+    {
+      "name": "graphics.pgn",
+      "games": [
+        {
+          "idxInFile": 0,
+          "offsetStart": 0,
+          "offsetEnd": 320,
+          "headers": [["Event", "Graphics"], ["Site", "?"], ["Date", "????.??.??"], ["Round", "?"], ["White", "Arrows"], ["Black", "Highlights"], ["Result", "*"]],
+          "warning": null
+        }
+      ]
+    },
+    {
+      "name": "headers_only.pgn",
+      "games": [
+        {
+          "idxInFile": 0,
+          "offsetStart": 0,
+          "offsetEnd": 116,
+          "headers": [["Event", "Header Only Game"], ["Site", "?"], ["Date", "????.??.??"], ["Round", "?"], ["White", "NoMoves"], ["Black", "AtAll"], ["Result", "*"]],
+          "warning": null
+        },
+        {
+          "idxInFile": 1,
+          "offsetStart": 118,
+          "offsetEnd": 238,
+          "headers": [["Event", "Normal After"], ["Site", "?"], ["Date", "????.??.??"], ["Round", "?"], ["White", "Has"], ["Black", "Moves"], ["Result", "*"]],
+          "warning": null
+        }
+      ]
+    },
+    {
+      "name": "malformed_middle.pgn",
+      "games": [
+        {
+          "idxInFile": 0,
+          "offsetStart": 0,
+          "offsetEnd": 128,
+          "headers": [["Event", "Good One"], ["Site", "?"], ["Date", "????.??.??"], ["Round", "?"], ["White", "First"], ["Black", "Fine"], ["Result", "1-0"]],
+          "warning": null
+        },
+        {
+          "idxInFile": 1,
+          "offsetStart": 130,
+          "offsetEnd": 263,
+          "headers": [["Event", "Broken"], ["Site", "?"], ["Date", "????.??.??"], ["Round", "?"], ["White", "Second"], ["Black", "Bad"], ["Result", "*"]],
+          "warning": null
+        },
+        {
+          "idxInFile": 2,
+          "offsetStart": 265,
+          "offsetEnd": 396,
+          "headers": [["Event", "Good Two"], ["Site", "?"], ["Date", "????.??.??"], ["Round", "?"], ["White", "Third"], ["Black", "Fine"], ["Result", "0-1"]],
+          "warning": null
+        }
+      ]
+    },
+    {
+      "name": "variations.pgn",
+      "games": [
+        {
+          "idxInFile": 0,
+          "offsetStart": 0,
+          "offsetEnd": 284,
+          "headers": [["Event", "Variations"], ["Site", "?"], ["Date", "????.??.??"], ["Round", "?"], ["White", "Tree"], ["Black", "Builder"], ["Result", "*"]],
+          "warning": null
+        }
+      ]
+    }
+  ]
+}

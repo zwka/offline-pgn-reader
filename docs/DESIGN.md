@@ -9,7 +9,6 @@ Status: v1.1.0 · Date: 2026-08-09 · Audience: solo maintainer
 **In scope (v1)**
 
 - Fully offline local web app: Node.js/TypeScript backend + browser UI served at `http://127.0.0.1:8642`.
-- Python remains in the repository only as the rollback runtime and compatibility oracle.
 - Register local PGN files (by path, by discovery in watch dirs, or by upload-copy into `library/`).
 - Streaming index of arbitrarily large PGN files: game boundaries, byte offsets, headers → SQLite.
 - Lazy hydration of a single game by byte span into a full-fidelity move-tree document.
@@ -35,16 +34,15 @@ search.
 - "Large" means multi-hundred-MB files / millions of games for the *index* path; individual games
   stay small enough (< a few MB) to hydrate eagerly once selected.
 - Node.js 24.11.1 and npm 11.6.0 are the documented production setup (the package accepts
-  Node.js `>=22.14.0 <27`); Python 3.11+ is available for rollback and oracle checks. Chromium is
-  used for browser verification.
+  Node.js `>=22.14.0 <27`). Chromium is used for browser verification.
 
 ## 3. Architecture decisions (ADR)
 
 | Decision | Choice | Rationale / trade-off |
 |---|---|---|
-| Web framework | **Fastify** | Typed route seams via TypeBox, low-overhead local HTTP, multipart/static plugins, and one Node process for production. FastAPI remains the rollback runtime and oracle. |
+| Web framework | **Fastify** | Typed route seams via TypeBox, low-overhead local HTTP, multipart/static plugins, and one Node process for production. |
 | Index store | **SQLite** (WAL), owned by `src/index.ts` | Zero-ops, single file in `data/`, fast enough for millions of rows, trivially backed up. `Index` owns registration, queries, status, tags, neighbors, transactional replacement, and reset; `src/database.ts` owns schema and connection lifecycle. The cache is schema-versioned and rebuildable from source PGNs at any time. |
-| PGN parsing | **Two-layer: custom streaming scanner for indexing + chess.js for hydration** | chess.js supplies the production SAN/RAV/NAG/FEN implementation while the scanner remains movetext-free for large indexes. The Python `python-chess` implementation runs against the same fixtures as the compatibility oracle. |
+| PGN parsing | **Two-layer: custom streaming scanner for indexing + chess.js for hydration** | chess.js supplies the production SAN/RAV/NAG/FEN implementation while the scanner remains movetext-free for large indexes. |
 | Board state | **Server computes FEN per node during hydration** | UI never replays moves; every node carries its position. Costs response size (~100 bytes/node), saves all client-side chess logic and repeated recomputation. |
 | Frontend | **Vanilla ES modules, no build step** | One dev, offline, no toolchain rot. ~1.5k lines of JS is well within no-framework territory. The board uses locally vendored CBurnett SVG pieces and inline graphics overlays. |
 | Concurrency | **`LibraryService` owns Scan lifecycle; `src/scan-worker.ts` is a narrow worker adapter** | Keeps API responsive during multi-GB scans; progress is polled via `GET /api/files/{id}`. The Index replacement is transactional, so a failed replacement leaves the previous index intact, while remove/reset/shutdown are guarded by the same lifecycle owner. |
@@ -52,7 +50,7 @@ search.
 
 ## 4. Parser strategy
 
-**Layer A — boundary scanner (`src/scanner.ts`, with the Python oracle counterpart), index time.**
+**Layer A — boundary scanner (`src/scanner.ts`), index time.**
 Binary chunk iteration with manual byte offset accounting, so offsets are exact regardless of encoding. State
 machine: `GAP → TAGS → MOVETEXT → (tag line seen) → boundary`. Crucially it tracks *brace-comment
 state across lines* so a `[` at line start inside a multi-line `{comment}` is not misread as a new
@@ -70,8 +68,7 @@ hydrator decodes UTF-8 (`errors="replace"`) and feeds the span to chess.js. The 
 the full recursive game tree: comments, starting comments, NAGs, variations, and
 `[FEN]/[SetUp]` starting positions. The tree is converted iteratively
 (explicit stack — nesting depth bounded, but no recursion-limit risk) into the document model
-below. `pgnreader/parser.py` provides the same operation through python-chess for rollback and
-parity checks.
+below.
 
 **Layer C — reader projection (`src/projection.ts`), response time.** The projection owns the translation from stored Index rows and hydrated payloads to wire responses: source records, Game records, document identity, ordered Tag pairs, neighboring game ids, source text, and shared error envelopes. Library operations delegate these reads to the projection, while the HTTP server only adapts route parameters and response schemas.
 
@@ -188,16 +185,13 @@ and `byte_size`.
 
 ## 10. Testing strategy
 
-Vitest (`tests-ts`), pytest (`tests`), and a cross-runtime parity test are the test layers.
-Synthetic fixtures in `tests/fixtures/` cover each PGN feature in isolation; the Python sample
-regression tests use the two tracked course files when present (185 and 351 games). TypeScript
-tests cover scanner, source-byte safety, hydration, Index persistence, Scan lifecycle, projection,
-intake, Library actions, API/wire contracts, configuration, and CLI behavior; Python tests retain
-the rollback implementation checks. Playwright covers the browser workflow. The parity test runs
-the Node and Python HTTP implementations against the same
-ten-fixture manifest (`tests/fixtures/parity_manifest.json`) and separate temporary SQLite files,
-then compares scan records, schema columns, indexed offsets, wire casing, ordered Tag pairs, flat
-GameDocument nodes, source text, and route error envelopes.
+Vitest (`tests-ts`) and Playwright are the test layers. Synthetic fixtures in `tests/fixtures/`
+cover each PGN feature in isolation, while the TypeScript suite covers scanner, source-byte safety,
+hydration, Index persistence, Scan lifecycle, projection, intake, Library actions, API/wire
+contracts, configuration, CLI behavior, and the ten-fixture behavior-contract suite. The contract
+suite uses `tests/fixtures/contract_manifest.json` and separate temporary SQLite files to verify
+scan records, schema columns, indexed offsets, wire casing, ordered Tag pairs, flat GameDocument
+nodes, source text, and route error envelopes. Playwright covers the browser workflow.
 
 ## 11. Release strategy
 
@@ -205,10 +199,8 @@ Single folder, `npm install`; production runs via `npm start` and owns the local
 SQLite cache. `src/index.ts` owns persistence, `src/source.ts` owns source-byte protection,
 `LibraryService` owns Scan coordination, and `ReaderProjection` owns response translation.
 TypeScript CLI subcommands are `serve`, `index [--force] PATH...`, and `reset`.
-The Python environment is optional and is retained only for `python -m pgnreader serve` rollback
-and oracle validation; use a separate data directory and port for that process. The acceptance
-gate is `npm run test:all`. `data/` is disposable cache — backup is optional, rebuild is one
-command.
+The acceptance gate is `npm run test:all`. `data/` is disposable cache — backup is optional,
+rebuild is one command.
 CHANGELOG.md tracks releases; schema version bump ⇒ automatic rebuild.
 
 ## Build history & resolved fallbacks
@@ -222,6 +214,5 @@ The delivered work followed this order:
 5. Frontend reader (third risk: variation rendering usability)
 6. Tests green, browser verification, packaging, and TypeScript cutover
 
-The custom scanner, server-positioned FENs, and vanilla-JS reader were retained. Python
-`python-chess` remains the rollback/oracle implementation, not the production parser; no alternate
+The custom scanner, server-positioned FENs, and vanilla-JS reader were retained; no alternate
 frontend or client-side move replay was needed.

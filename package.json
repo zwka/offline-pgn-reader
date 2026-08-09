@@ -18,9 +18,8 @@
     "test:ts": "vitest run",
     "test:watch": "vitest",
     "test:browser": "playwright test",
-    "test:python": ".venv/bin/python -m pytest",
-    "test:parity": "vitest run tests-ts/parity.test.ts",
-    "test:all": "npm run typecheck && npm run test:ts && npm run test:python && npm run test:parity && npm run test:browser"
+    "test:contracts": "vitest run tests-ts/contracts.test.ts",
+    "test:all": "npm run typecheck && npm run test:contracts && npm run test:ts -- --exclude tests-ts/contracts.test.ts && npm run test:browser"
   },
   "dependencies": {
     "@fastify/multipart": "^10.1.0",
