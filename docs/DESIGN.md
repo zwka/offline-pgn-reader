@@ -1,6 +1,6 @@
 # Offline PGN Reader — Design & Architecture Record
 
-Status: v1.1.0 · Date: 2026-08-09 · Audience: solo maintainer
+Status: current · Updated: 2026-09-25 · Audience: solo maintainer
 
 ---
 
@@ -9,6 +9,7 @@ Status: v1.1.0 · Date: 2026-08-09 · Audience: solo maintainer
 **In scope (v1)**
 
 - Fully offline local web app: Node.js/TypeScript backend + browser UI served at `http://127.0.0.1:8642`.
+- Standalone static mobile browser client: exactly one active copied PGN source, a browser Scan worker, and a versioned IndexedDB-backed Mobile Library. Its shell requires one initial online HTTPS load or installation before persisted reading works offline.
 - Register local PGN files (by path, by discovery in watch dirs, or by upload-copy into `library/`).
 - Streaming index of arbitrarily large PGN files: game boundaries, byte offsets, headers → SQLite.
 - Lazy hydration of a single game by byte span into a full-fidelity move-tree document.
@@ -31,8 +32,9 @@ search.
 - Files may be Chessable exports (observed in `samples/`): UTF-8 (sometimes BOM), CRLF possible,
   very long single-line movetext, `[FEN]` on every game, nonstandard Black move numbers (`1. c6`),
   suffix annotations (`!?`) and numeric NAGs, heavy RAV nesting, `*` results.
-- "Large" means multi-hundred-MB files / millions of games for the *index* path; individual games
-  stay small enough (< a few MB) to hydrate eagerly once selected.
+- On the desktop index path, "Large" means multi-hundred-MB files / millions of games; individual
+  games stay small enough (< a few MB) to hydrate eagerly once selected. The mobile path accepts
+  sources up to 50 MiB and GameDocument spans up to 8 MiB.
 - Node.js 24.11.1 and npm 11.6.0 are the documented production setup (the package accepts
   Node.js `>=22.14.0 <27`). Chromium is used for browser verification.
 
@@ -44,14 +46,15 @@ search.
 | Index store | **SQLite** (WAL), owned by `src/index.ts` | Zero-ops, single file in `data/`, fast enough for millions of rows, trivially backed up. `Index` owns registration, queries, status, tags, neighbors, transactional replacement, and reset; `src/database.ts` owns schema and connection lifecycle. The cache is schema-versioned and rebuildable from source PGNs at any time. |
 | PGN parsing | **Two-layer: custom streaming scanner for indexing + chess.js for hydration** | chess.js supplies the production SAN/RAV/NAG/FEN implementation while the scanner remains movetext-free for large indexes. |
 | Board state | **Server computes FEN per node during hydration** | UI never replays moves; every node carries its position. Costs response size (~100 bytes/node), saves all client-side chess logic and repeated recomputation. |
-| Frontend | **Vanilla ES modules, no build step** | One dev, offline, no toolchain rot. ~1.5k lines of JS is well within no-framework territory. The board uses locally vendored CBurnett SVG pieces and inline graphics overlays. |
+| Frontend | **Desktop: vanilla ES modules with no build step; mobile: compiled static modules** | One dev, offline, no framework runtime. The desktop board uses locally vendored CBurnett SVG pieces and inline graphics overlays; the mobile build vendors the same pieces and its chess modules. |
 | Concurrency | **`LibraryService` owns Scan lifecycle; `src/scan-worker.ts` is a narrow worker adapter** | Keeps API responsive during multi-GB scans; progress is polled via `GET /api/files/{id}`. The Index replacement is transactional, so a failed replacement leaves the previous index intact, while remove/reset/shutdown are guarded by the same lifecycle owner. |
+| Mobile Library | **`PersistentMobileLibrary` with an IndexedDB snapshot** | The mobile adapter projects the existing Game record vocabulary, receives browser-worker Scan events, bounds list pages to 50 records without limiting the total, and stages a replacement separately from the active source. One versioned IndexedDB record stores the source bytes, metadata, spans, ordered Tag pairs, warnings, and Index records; the active source changes only after the snapshot write succeeds. Sources over 50 MiB and GameDocument spans over 8 MiB are rejected, and failed or cancelled replacements leave the active snapshot intact. |
 | Source fidelity | **`src/source.ts` owns fingerprint and span access** | Original bytes are never rewritten; Index stores offsets and ordered Tag pairs; source responses decode the indexed span as UTF-8 only after bounded, race-checked reads. Parser normalization affects the document model only, and changed or missing sources are refused rather than served through stale offsets. |
 
 ## 4. Parser strategy
 
-**Layer A — boundary scanner (`src/scanner.ts`), index time.**
-Binary chunk iteration with manual byte offset accounting, so offsets are exact regardless of encoding. State
+**Layer A — boundary scanner (`src/scan.ts`), index time.**
+The platform-neutral scanner consumes a `ByteSource` stream with manual byte offset accounting, so offsets are exact regardless of encoding. The filesystem-facing `src/scanner.ts` adapter keeps the existing path API, while `src/browser-source.ts` adapts a browser `File` or `Blob`. State
 machine: `GAP → TAGS → MOVETEXT → (tag line seen) → boundary`. Crucially it tracks *brace-comment
 state across lines* so a `[` at line start inside a multi-line `{comment}` is not misread as a new
 game. Handles UTF-8 BOM, CRLF, `%` escape lines, `;` rest-of-line comments. Tag pairs are extracted
@@ -61,9 +64,9 @@ never produce a valid tag section still become records (flagged `warning`) as lo
 attributable; garbage between games is attached to the following boundary decision, never crashes
 the scan.
 
-**Layer B — source access and hydrator (`src/source.ts`, `src/hydration.ts`), read time.** The
-source module checks the stored fingerprint, validates the bounded span, reads exactly
-`offset_end - offset_start` bytes, and checks the fingerprint again before returning. The
+**Layer B — source access and hydrator (`src/source.ts`, `src/browser-source.ts`, `src/hydration.ts`), read time.** The
+Node source adapter checks the stored fingerprint; both source adapters validate the bounded span and read exactly
+`offset_end - offset_start` bytes. The Node adapter checks the fingerprint again before returning. The
 hydrator decodes UTF-8 (`errors="replace"`) and feeds the span to chess.js. The parser yields
 the full recursive game tree: comments, starting comments, NAGs, variations, and
 `[FEN]/[SetUp]` starting positions. The tree is converted iteratively
@@ -160,7 +163,9 @@ File records report `pending`, `scanning`, `ready`, or `error`; `stale` is deriv
 fingerprint. Game records include the roster fields plus `eco`, `opening`, `has_fen`, `warning`,
 and `byte_size`.
 
-## 8. UI route/view map (hash-routed SPA)
+## 8. UI route/view map
+
+Desktop uses these hash routes:
 
 - `#/library` — file cards (status, game count, progress bar), discover/add/upload, Remove, and
   Reset controls.
@@ -171,6 +176,9 @@ and `byte_size`.
   sidelines as indented, bordered sub-blocks (collapsible at depth ≥ 3); NAG glyphs attach to
   their move token. Current node highlighted and kept scrolled into view. The board uses local
   CBurnett SVG pieces and renders `[%cal]`/`[%csl]` graphics.
+- `/mobile/` — standalone static client: choose one `.pgn`, confirm replacements, restore or clear
+  the persisted source, watch Scan status and progress, search roster metadata, and page through
+  at most 50 Game records at once without a total-count cap.
 
 ## 9. Performance strategy
 
@@ -191,15 +199,23 @@ hydration, Index persistence, Scan lifecycle, projection, intake, Library action
 contracts, configuration, CLI behavior, and the ten-fixture behavior-contract suite. The contract
 suite uses `tests/fixtures/contract_manifest.json` and separate temporary SQLite files to verify
 scan records, schema columns, indexed offsets, wire casing, ordered Tag pairs, flat GameDocument
-nodes, source text, and route error envelopes. Playwright covers the browser workflow.
+nodes, source text, and route error envelopes. Playwright covers the desktop browser workflow;
+`tests/mobile` serves only the compiled static client and verifies the worker-backed Scan/list,
+versioned precache, install metadata, network-blocked reader restoration, and browser-persistence
+slice without the desktop server.
 
 ## 11. Release strategy
 
-Single folder, `npm install`; production runs via `npm start` and owns the local HTTP routes and
-SQLite cache. `src/index.ts` owns persistence, `src/source.ts` owns source-byte protection,
-`LibraryService` owns Scan coordination, and `ReaderProjection` owns response translation.
-TypeScript CLI subcommands are `serve`, `index [--force] PATH...`, and `reset`.
-The acceptance gate is `npm run test:all`. `data/` is disposable cache — backup is optional,
+Single folder, `npm install`; the desktop production path runs via `npm start` and owns the local
+HTTP routes, filesystem-backed PGN sources, and SQLite cache. The mobile production path is the
+static `mobile/` directory and must be served over HTTPS on a phone; the first online load or
+installation supplies the cached shell. `src/index.ts` owns desktop persistence, `src/source.ts`
+owns desktop source-byte protection, `LibraryService` owns desktop Scan coordination, and
+`ReaderProjection` owns desktop response translation. TypeScript CLI subcommands are `serve`,
+`index [--force] PATH...`, and `reset`. `npm run build` typechecks and builds the mobile
+artifacts; `npm run build:mobile` rebuilds the mobile TypeScript output, vendored chess modules,
+pieces, and service-worker precache. The desktop release gate is `npm run test:all`; the
+mobile-specific gate is `npm run test:mobile`. `data/` is disposable cache — backup is optional,
 rebuild is one command.
 CHANGELOG.md tracks releases; schema version bump ⇒ automatic rebuild.
 

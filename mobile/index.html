@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#18211f">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>PGN Reader Mobile</title>
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="apple-touch-icon" sizes="180x180" href="./icons/icon-180.png">
+  <link rel="stylesheet" href="./mobile.css">
+</head>
+<body>
+  <header class="mobile-header">
+    <a class="brand" href="./">PGN Reader <span>Mobile</span></a>
+    <span class="local-mark">Local</span>
+  </header>
+
+  <main id="app" class="mobile-main">
+    <section id="import-panel" class="import-panel" aria-labelledby="import-title">
+      <div>
+        <p class="kicker">Mobile Library</p>
+        <h1 id="import-title">One PGN source</h1>
+        <p class="panel-note">Select a local source to build its Game records.</p>
+      </div>
+      <label class="file-picker" for="source-input">
+        Choose PGN source
+        <input id="source-input" type="file" accept=".pgn,application/x-chess-pgn">
+      </label>
+    </section>
+
+    <section id="source-panel" class="source-panel" aria-labelledby="source-title">
+      <div class="section-heading">
+        <div>
+          <p class="kicker">Source</p>
+          <h2 id="source-title"><span id="source-name">No PGN source selected</span></h2>
+        </div>
+        <div class="source-actions">
+          <span id="source-status" class="status status-idle" role="status">idle</span>
+          <button id="clear-source" class="clear-source" type="button" disabled>Clear source</button>
+        </div>
+      </div>
+      <div class="source-stats">
+        <div><span>Size</span><strong id="source-size">-</strong></div>
+        <div><span>Game records</span><strong id="game-count">0</strong></div>
+        <div><span>Warnings</span><strong id="warning-count">No warnings</strong></div>
+      </div>
+      <progress id="scan-progress" max="1" value="0" aria-label="Scan progress"></progress>
+      <p id="scan-progress-label" class="progress-label" role="status">Choose a local PGN source to begin.</p>
+      <p id="replacement-status" class="replacement-status" role="status" hidden></p>
+      <p id="source-error" class="source-error" role="alert" hidden></p>
+    </section>
+
+    <section id="records-panel" class="records-panel" aria-labelledby="records-title">
+      <div class="section-heading records-heading">
+        <div>
+          <p class="kicker">Index</p>
+          <h2 id="records-title">Game records</h2>
+        </div>
+        <span id="list-summary" class="list-summary">No Game records</span>
+      </div>
+      <label class="search-label" for="metadata-search">Search metadata</label>
+      <input
+        id="metadata-search"
+        class="metadata-search"
+        type="search"
+        placeholder="Player, event, site, ECO, opening, date"
+        autocomplete="off"
+      >
+      <div id="record-list" class="record-list" aria-live="polite"></div>
+      <div class="pager" aria-label="Game record pages">
+        <button id="previous-page" type="button" disabled>Previous</button>
+        <button id="next-page" type="button" disabled>Next</button>
+      </div>
+    </section>
+
+    <section id="reader-panel" class="reader-panel" aria-label="Game reader" hidden></section>
+  </main>
+
+  <script type="importmap">
+    {
+      "imports": {
+        "chess.js": "./dist/vendor/chess.js",
+        "chess.js/src/pgn.js": "./dist/vendor/pgn.js"
+      }
+    }
+  </script>
+  <script type="module" src="./dist/mobile/app.js"></script>
+</body>
+</html>

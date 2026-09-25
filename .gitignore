@@ -4,4 +4,6 @@ library/
 node_modules/
 playwright-report/
 test-results/
+mobile/dist/
+mobile/pieces/
 .benchmark-scan-*/

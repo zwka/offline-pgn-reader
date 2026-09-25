@@ -4,6 +4,9 @@ status: superseded by ADR-0002
 
 # Full TypeScript Migration Architecture
 
+> Superseded by ADR-0002: the Python rollback/oracle runtime described here was
+> temporary migration-era behavior and is no longer part of the repository.
+
 The application replaces the Python production runtime with an npm-managed Node.js and TypeScript server while retaining the vanilla browser JavaScript reader and the single-process localhost experience. It keeps the existing SQLite library readable. The migration is behavior-first and incremental: its required deep modules are the external wire model, PGN source scanner, GameDocument hydration, index persistence, scan coordination, and reader projection. Python remains the rollback runtime and compatibility oracle after the shared parity gate, while Node.js/TypeScript owns production behavior.
 
 ## Considered Options
