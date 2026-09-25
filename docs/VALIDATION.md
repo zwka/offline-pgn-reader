@@ -26,6 +26,7 @@ HTTP wire responses, source spans, ordered Tag pairs, and GameDocument payloads.
 | 14 | Navigation correctness | wrong sibling cycling, dead ends | `tests/browser/smoke.spec.ts`, `tests/fixtures/variations.pgn` | Keyboard navigation follows the GameDocument tree |
 | 15 | Startup and shutdown | port conflicts, schema drift, dirty WAL | `tests-ts/health.test.ts`, `tests-ts/cli.test.ts`, `tests-ts/scan-lifecycle.test.ts`, `src/database.ts` | Health, schema, worker cleanup, reset, and recovery behavior are covered |
 | 16 | Mobile persistence and replacement | lost source after reload, partial replacement, quota/schema failures, threshold regressions | `tests-ts/mobile-library.test.ts`, `tests/mobile/smoke.spec.ts`, `src/mobile/storage.ts` | IndexedDB snapshot restore, atomic promotion, recoverable failures, clear, 50 MiB/8 MiB thresholds, and unbounded record counts are covered |
+| 17 | Mobile PWA installation and offline reading | missing shell/worker assets, invalid install metadata, network-dependent reader, discarded active source on update | `tests/mobile/pwa.spec.ts`, `build-mobile.mjs`, `mobile/manifest.webmanifest`, `mobile/service-worker.js` | Static manifest and icons, versioned precache, service-worker scope/update behavior, empty offline startup, and network-blocked board/notation/tags/raw-source restoration are covered |
 
 ## Behavior Contracts
 

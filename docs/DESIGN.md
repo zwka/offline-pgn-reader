@@ -197,8 +197,9 @@ contracts, configuration, CLI behavior, and the ten-fixture behavior-contract su
 suite uses `tests/fixtures/contract_manifest.json` and separate temporary SQLite files to verify
 scan records, schema columns, indexed offsets, wire casing, ordered Tag pairs, flat GameDocument
 nodes, source text, and route error envelopes. Playwright covers the desktop browser workflow;
-`tests/mobile` serves only the compiled static client and verifies the worker-backed import/list
-and browser-persistence slice without the desktop server.
+`tests/mobile` serves only the compiled static client and verifies the worker-backed import/list,
+versioned precache, install metadata, network-blocked reader restoration, and browser-persistence
+slice without the desktop server.
 
 ## 11. Release strategy
 

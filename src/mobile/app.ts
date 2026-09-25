@@ -8,6 +8,8 @@ import {
 } from "./library.js";
 import { renderMobileReader, type MobileReaderHandle } from "./reader.js";
 
+registerServiceWorker();
+
 const importPanel = getElement<HTMLElement>("import-panel");
 const sourcePanel = getElement<HTMLElement>("source-panel");
 const recordsPanel = getElement<HTMLElement>("records-panel");
@@ -338,4 +340,13 @@ function getElement<T extends HTMLElement>(id: string): T {
   const element = document.getElementById(id);
   if (!element) throw new Error(`mobile shell is missing #${id}`);
   return element as T;
+}
+
+function registerServiceWorker(): void {
+  if (!("serviceWorker" in navigator)) return;
+  const serviceWorkerUrl = new URL("../../service-worker.js", import.meta.url);
+  const scope = new URL("../../", import.meta.url).pathname;
+  void navigator.serviceWorker.register(serviceWorkerUrl, { scope }).catch(() => {
+    // The reader remains usable when a static host does not support service workers.
+  });
 }

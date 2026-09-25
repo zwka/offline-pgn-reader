@@ -65,6 +65,11 @@ python3 -m http.server 8763 --bind 127.0.0.1 --directory mobile
 
 Open <http://127.0.0.1:8763>. The static server is only needed to load browser
 modules and workers; no Node process is needed while using the mobile client.
+For installation on a phone, publish the complete `mobile/` directory over
+HTTPS. The build includes Android Chrome/iOS Safari manifest metadata, local
+icons, and a versioned service-worker precache. Increment `CACHE_VERSION` in
+`build-mobile.mjs` for a release that should replace the cached application
+shell; the Mobile Library remains in IndexedDB across that update.
 
 ### Read your first game
 
