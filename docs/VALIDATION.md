@@ -25,6 +25,7 @@ HTTP wire responses, source spans, ordered Tag pairs, and GameDocument payloads.
 | 13 | Notation rendering | variation context loss, comment blobs, large trees | `tests/browser/smoke.spec.ts`, `frontend/notation.js` | Reader rendering and chunked large-document updates are covered |
 | 14 | Navigation correctness | wrong sibling cycling, dead ends | `tests/browser/smoke.spec.ts`, `tests/fixtures/variations.pgn` | Keyboard navigation follows the GameDocument tree |
 | 15 | Startup and shutdown | port conflicts, schema drift, dirty WAL | `tests-ts/health.test.ts`, `tests-ts/cli.test.ts`, `tests-ts/scan-lifecycle.test.ts`, `src/database.ts` | Health, schema, worker cleanup, reset, and recovery behavior are covered |
+| 16 | Mobile persistence and replacement | lost source after reload, partial replacement, quota/schema failures, threshold regressions | `tests-ts/mobile-library.test.ts`, `tests/mobile/smoke.spec.ts`, `src/mobile/storage.ts` | IndexedDB snapshot restore, atomic promotion, recoverable failures, clear, 50 MiB/8 MiB thresholds, and unbounded record counts are covered |
 
 ## Behavior Contracts
 

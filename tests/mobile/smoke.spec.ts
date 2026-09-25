@@ -54,6 +54,45 @@ test("loads as a standalone static mobile client and imports one source", async 
   expect(apiRequests).toEqual([]);
 });
 
+test("restores the persisted Mobile Library after reload and clears it", async ({ page }) => {
+  const source = Buffer.from([
+    '[Event "Persistent mobile source"]',
+    '[White "Reloaded"]',
+    '[Black "Reader"]',
+    "",
+    "1. e4 *",
+    "",
+  ].join("\n"));
+
+  await page.goto("/");
+  await page.locator("#source-input").setInputFiles({
+    name: "persistent-mobile.pgn",
+    mimeType: "application/x-chess-pgn",
+    buffer: source,
+  });
+  await expect(page.locator("#source-status")).toHaveText("ready", { timeout: 10_000 });
+  await expect(page.locator("#record-list .game-record")).toHaveCount(1);
+
+  await page.reload();
+  await expect(page.locator("#source-status")).toHaveText("ready", { timeout: 10_000 });
+  await expect(page.locator("#source-name")).toHaveText("persistent-mobile.pgn");
+  await expect(page.locator("#record-list .game-record")).toHaveCount(1);
+  await page.locator("#record-list .game-record").click();
+  await expect(page.locator(".reader-title")).toContainText("Reloaded");
+  await page.getByRole("button", { name: "Raw PGN source" }).click();
+  await expect(page.locator(".raw-source")).toContainText('[Event "Persistent mobile source"]');
+
+  await page.getByRole("button", { name: "Back to Game records" }).click();
+  await page.locator("#clear-source").click();
+  await expect(page.locator("#source-status")).toHaveText("idle");
+  await expect(page.locator("#source-name")).toHaveText("No PGN source selected");
+  await expect(page.locator("#record-list .game-record")).toHaveCount(0);
+
+  await page.reload();
+  await expect(page.locator("#source-status")).toHaveText("idle");
+  await expect(page.locator("#record-list .game-record")).toHaveCount(0);
+});
+
 test("keeps the main thread usable and bounds the searchable Game record list", async ({ page }) => {
   const source = Array.from({ length: 101 }, (_, index) => {
     const number = index + 1;

@@ -2,10 +2,17 @@ import { describe, expect, it } from "vitest";
 
 import {
   InMemoryMobileLibrary,
+  MOBILE_MAX_GAME_BYTES,
+  MOBILE_MAX_SOURCE_BYTES,
   MOBILE_PAGE_SIZE,
+  PersistentMobileLibrary,
   type MobileScanWorker,
 } from "../src/mobile/library.js";
 import type { MobileScanMessage, MobileScanRequest } from "../src/mobile/scan-protocol.js";
+import type {
+  MobileLibrarySnapshot,
+  MobileLibraryStorage,
+} from "../src/mobile/storage.js";
 
 class ManualWorker implements MobileScanWorker {
   onmessage: MobileScanWorker["onmessage"] = null;
@@ -188,6 +195,273 @@ describe("in-memory Mobile Library", () => {
     expect(document.source).toBe(sourceText.slice(secondStart));
   });
 });
+
+class MemoryMobileStorage implements MobileLibraryStorage {
+  snapshot: MobileLibrarySnapshot | null = null;
+  loadError: Error | null = null;
+  saveError: Error | null = null;
+  clearError: Error | null = null;
+
+  async load(): Promise<MobileLibrarySnapshot | null> {
+    if (this.loadError) throw this.loadError;
+    return this.snapshot;
+  }
+
+  async save(snapshot: MobileLibrarySnapshot): Promise<void> {
+    if (this.saveError) throw this.saveError;
+    this.snapshot = snapshot;
+  }
+
+  async clear(): Promise<void> {
+    if (this.clearError) throw this.clearError;
+    this.snapshot = null;
+  }
+}
+
+describe("persistent Mobile Library", () => {
+  it("persists source bytes and Index data, then restores a readable GameDocument", async () => {
+    const storage = new MemoryMobileStorage();
+    const workers: ManualWorker[] = [];
+    const library = new PersistentMobileLibrary(() => {
+      const worker = new ManualWorker();
+      workers.push(worker);
+      return worker;
+    }, storage);
+    await library.ready();
+
+    const sourceText = '[Event "Persisted"]\n[Event "Duplicate"]\n[White "Reader"]\n\n1. e4 *\n';
+    const replacement = library.replaceSource({
+      name: "persisted.pgn",
+      blob: new Blob([sourceText]),
+    });
+    workers[0].send({ type: "game", game: scannedGame(0, sourceText, [
+      ["Event", "Persisted"],
+      ["Event", "Duplicate"],
+      ["White", "Reader"],
+    ], "malformed record") });
+    workers[0].send({ type: "complete" });
+    await replacement;
+
+    expect(storage.snapshot).toMatchObject({
+      schemaVersion: 1,
+      source: {
+        name: "persisted.pgn",
+        size: new TextEncoder().encode(sourceText).byteLength,
+        game_count: 1,
+        warning_count: 1,
+        scan_status: "ready",
+      },
+      games: [{
+        scanned: {
+          offsetStart: 0,
+          offsetEnd: new TextEncoder().encode(sourceText).byteLength,
+          headers: [
+            ["Event", "Persisted"],
+            ["Event", "Duplicate"],
+            ["White", "Reader"],
+          ],
+          warning: "malformed record",
+        },
+      }],
+    });
+
+    const restored = new PersistentMobileLibrary(() => {
+      throw new Error("restore should not start a Scan worker");
+    }, storage);
+    await restored.ready();
+    expect(restored.source).toMatchObject({
+      name: "persisted.pgn",
+      scan_status: "ready",
+      game_count: 1,
+      warning_count: 1,
+    });
+    expect(restored.listGames().games[0].warning).toBe("malformed record");
+    const document = await restored.getGameDocument(1);
+    expect(document.headers).toEqual([
+      ["Event", "Persisted"],
+      ["Event", "Duplicate"],
+      ["White", "Reader"],
+    ]);
+    expect(document.warnings).toEqual(["index warning: malformed record"]);
+    expect(document.source).toBe(sourceText);
+  });
+
+  it("keeps the active source while a replacement is cancelled, invalid, unreadable, or over-limit", async () => {
+    const storage = new MemoryMobileStorage();
+    const workers: ManualWorker[] = [];
+    const library = new PersistentMobileLibrary(() => {
+      const worker = new ManualWorker();
+      workers.push(worker);
+      return worker;
+    }, storage);
+    await library.ready();
+    const firstText = '[Event "First"]\n\n1. e4 *\n';
+    await completeReplacement(library, workers, "first.pgn", firstText);
+
+    const invalid = library.replaceSource({ name: "notes.txt", blob: new Blob(["invalid"]) });
+    await invalid;
+    expect(library.source?.name).toBe("first.pgn");
+    expect(library.error).toContain("ends in .pgn");
+
+    const cancelled = library.replaceSource({
+      name: "cancelled.pgn",
+      blob: new Blob(["cancelled"]),
+    });
+    library.cancelReplacement();
+    await cancelled;
+    expect(library.source?.name).toBe("first.pgn");
+    expect(library.listGames().games[0].event).toBe("First");
+
+    const unreadable = library.replaceSource({
+      name: "unreadable.pgn",
+      blob: new Blob(["unreadable"]),
+    });
+    workers.at(-1)!.send({ type: "error", error: "source could not be read" });
+    await unreadable;
+    expect(library.source?.name).toBe("first.pgn");
+    expect(library.error).toContain("source could not be read");
+
+    const oversized = library.replaceSource({
+      name: "oversized.pgn",
+      blob: sizedBlob(MOBILE_MAX_SOURCE_BYTES + 1),
+    });
+    await oversized;
+    expect(library.source?.name).toBe("first.pgn");
+    expect(library.error).toContain("50 MiB");
+
+    const gameTooLarge = library.replaceSource({
+      name: "large-game.pgn",
+      blob: sizedBlob(MOBILE_MAX_GAME_BYTES + 1),
+    });
+    workers.at(-1)!.send({
+      type: "game",
+      game: scannedGame(0, "", [["Event", "Too large"]], null, MOBILE_MAX_GAME_BYTES + 1),
+    });
+    await gameTooLarge;
+    expect(library.source?.name).toBe("first.pgn");
+    expect(library.error).toContain("8 MiB");
+  });
+
+  it("leaves the prior snapshot and active reader data on storage failure", async () => {
+    const storage = new MemoryMobileStorage();
+    const workers: ManualWorker[] = [];
+    const library = new PersistentMobileLibrary(() => {
+      const worker = new ManualWorker();
+      workers.push(worker);
+      return worker;
+    }, storage);
+    await library.ready();
+    const firstText = '[Event "First"]\n\n1. e4 *\n';
+    await completeReplacement(library, workers, "first.pgn", firstText);
+    const priorSnapshot = storage.snapshot;
+    storage.saveError = new Error("quota exceeded");
+
+    const replacement = library.replaceSource({
+      name: "replacement.pgn",
+      blob: new Blob(['[Event "Replacement"]\n\n1. d4 *\n']),
+    });
+    workers.at(-1)!.send({
+      type: "game",
+      game: scannedGame(0, '[Event "Replacement"]\n\n1. d4 *\n', [["Event", "Replacement"]]),
+    });
+    workers.at(-1)!.send({ type: "complete" });
+    await replacement;
+
+    expect(library.source?.name).toBe("first.pgn");
+    expect(library.listGames().games[0].event).toBe("First");
+    expect(await library.getGameDocument(1).then((document) => document.source)).toBe(firstText);
+    expect(storage.snapshot).toBe(priorSnapshot);
+    expect(library.error).toContain("quota exceeded");
+
+    storage.clearError = new Error("clear quota exceeded");
+    await library.clear();
+    expect(library.source?.name).toBe("first.pgn");
+    expect(library.listGames().games[0].event).toBe("First");
+    expect(library.error).toContain("clear quota exceeded");
+  });
+
+  it("accepts more than sixty Game records and can clear the persisted source", async () => {
+    const storage = new MemoryMobileStorage();
+    const workers: ManualWorker[] = [];
+    const library = new PersistentMobileLibrary(() => {
+      const worker = new ManualWorker();
+      workers.push(worker);
+      return worker;
+    }, storage);
+    await library.ready();
+    const source = new Blob(["x"]);
+    const replacement = library.replaceSource({ name: "many.pgn", blob: source });
+    for (let index = 0; index < 61; index += 1) {
+      workers[0].send({
+        type: "game",
+        game: scannedGame(index, "x", [["Event", `Event ${index}`]], null, 1),
+      });
+    }
+    workers[0].send({ type: "complete" });
+    await replacement;
+
+    expect(library.listGames().total).toBe(61);
+    expect(library.listGames("Event 60").games).toHaveLength(1);
+    expect(library.listGames("", 50).games).toHaveLength(11);
+
+    await library.clear();
+    expect(library.source).toBeNull();
+    expect(library.listGames().total).toBe(0);
+    const restored = new PersistentMobileLibrary(() => {
+      throw new Error("cleared Mobile Library should not scan");
+    }, storage);
+    await restored.ready();
+    expect(restored.source).toBeNull();
+    expect(restored.listGames().total).toBe(0);
+  });
+
+  it("reports unavailable storage without throwing from initialization", async () => {
+    const storage = new MemoryMobileStorage();
+    storage.loadError = new Error("IndexedDB is unavailable");
+    const library = new PersistentMobileLibrary(() => {
+      throw new Error("storage failure should not scan");
+    }, storage);
+
+    await expect(library.ready()).resolves.toBeUndefined();
+    expect(library.source).toBeNull();
+    expect(library.error).toContain("IndexedDB is unavailable");
+  });
+});
+
+async function completeReplacement(
+  library: PersistentMobileLibrary,
+  workers: ManualWorker[],
+  name: string,
+  sourceText: string,
+): Promise<void> {
+  const replacement = library.replaceSource({ name, blob: new Blob([sourceText]) });
+  workers.at(-1)!.send({
+    type: "game",
+    game: scannedGame(0, sourceText, [["Event", name.replace(/\.pgn$/i, "").replace(/^./, (letter) => letter.toUpperCase())]]),
+  });
+  workers.at(-1)!.send({ type: "complete" });
+  await replacement;
+}
+
+function scannedGame(
+  index: number,
+  sourceText: string,
+  headers: Array<[string, string]>,
+  warning: string | null = null,
+  offsetEnd = new TextEncoder().encode(sourceText).byteLength,
+): NonNullable<Extract<MobileScanMessage, { type: "game" }>["game"]> {
+  return {
+    idxInFile: index,
+    offsetStart: 0,
+    offsetEnd,
+    headers,
+    warning,
+  };
+}
+
+function sizedBlob(size: number): Blob {
+  return { size } as Blob;
+}
 
 function gameMessage(event: string, opening = ""): MobileScanMessage {
   return {

@@ -54,9 +54,9 @@ terminal when you want to stop it.
 
 ### Try the mobile client
 
-The first mobile slice is a separate static browser build. It scans the one
-selected `.pgn` source in a Web Worker and does not connect to the desktop
-server or use the desktop Library index.
+The mobile client is a separate static browser build. It scans and persists one
+selected `.pgn` source in a Web Worker and browser storage; it does not connect
+to the desktop server or use the desktop Library index.
 
 ```bash
 npm run build:mobile
@@ -293,7 +293,7 @@ source areas are:
 frontend/            Browser interface (board, notation tree, Library)
 frontend/pieces/     Local CBurnett SVG chess pieces
 mobile/               Standalone static mobile client and generated build
-src/mobile/           In-memory Mobile Library and browser Scan worker
+src/mobile/           Persistent Mobile Library and browser Scan worker
 src/server.ts        Fastify routes and static hosting
 src/library.ts       Library intake and Scan lifecycle
 src/scan-worker.ts   Background Scan worker adapter

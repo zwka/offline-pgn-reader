@@ -32,7 +32,10 @@
           <p class="kicker">Source</p>
           <h2 id="source-title"><span id="source-name">No PGN source selected</span></h2>
         </div>
-        <span id="source-status" class="status status-idle" role="status">idle</span>
+        <div class="source-actions">
+          <span id="source-status" class="status status-idle" role="status">idle</span>
+          <button id="clear-source" class="clear-source" type="button" disabled>Clear source</button>
+        </div>
       </div>
       <div class="source-stats">
         <div><span>Size</span><strong id="source-size">-</strong></div>
@@ -41,6 +44,7 @@
       </div>
       <progress id="scan-progress" max="1" value="0" aria-label="Scan progress"></progress>
       <p id="scan-progress-label" class="progress-label" role="status">Choose a local PGN source to begin.</p>
+      <p id="replacement-status" class="replacement-status" role="status" hidden></p>
       <p id="source-error" class="source-error" role="alert" hidden></p>
     </section>
 

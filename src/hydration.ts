@@ -1,7 +1,7 @@
 import { Chess } from "chess.js";
 import { parse } from "chess.js/src/pgn.js";
 
-import type { TagPair } from "./scanner.js";
+import type { TagPair } from "./scan.js";
 import type { GameDocumentPayload, GameNode } from "./wire.js";
 
 const HEADER_LINE_RE = /^[ \t]*\[[ \t]*([A-Za-z][A-Za-z0-9_]*)[ \t]+"((?:[^"\\]|\\.)*)"[ \t]*\][ \t]*(?:\r)?$/gm;

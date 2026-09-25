@@ -1,5 +1,5 @@
 import {
-  InMemoryMobileLibrary,
+  PersistentMobileLibrary,
   MOBILE_PAGE_SIZE,
   type MobileLibrary,
   type MobileGameRecord,
@@ -19,15 +19,17 @@ const gameCount = getElement<HTMLElement>("game-count");
 const warningCount = getElement<HTMLElement>("warning-count");
 const scanProgress = getElement<HTMLProgressElement>("scan-progress");
 const progressLabel = getElement<HTMLElement>("scan-progress-label");
+const replacementStatus = getElement<HTMLElement>("replacement-status");
 const sourceError = getElement<HTMLElement>("source-error");
 const sourceInput = getElement<HTMLInputElement>("source-input");
+const clearSource = getElement<HTMLButtonElement>("clear-source");
 const searchInput = getElement<HTMLInputElement>("metadata-search");
 const recordList = getElement<HTMLElement>("record-list");
 const listSummary = getElement<HTMLElement>("list-summary");
 const previousPage = getElement<HTMLButtonElement>("previous-page");
 const nextPage = getElement<HTMLButtonElement>("next-page");
 
-const library: MobileLibrary = new InMemoryMobileLibrary(() =>
+const library: MobileLibrary = new PersistentMobileLibrary(() =>
   new Worker(new URL("./scan-worker.js", import.meta.url), { type: "module" }) as unknown as MobileScanWorker,
 );
 
@@ -40,12 +42,31 @@ let activeReader: MobileReaderHandle | null = null;
 sourceInput.addEventListener("change", () => {
   const file = sourceInput.files?.[0];
   if (!file) return;
-  closeReader();
   query = "";
   offset = 0;
   searchInput.value = "";
-  library.replaceSource({ name: file.name, blob: file });
+  void library.replaceSource({ name: file.name, blob: file }).then(() => {
+    if (library.replacement !== null) return;
+    const active = library.source;
+    const committed = !library.error && active?.name === file.name && active.size === file.size;
+    if (committed) {
+      closeReader();
+    } else if (library.error && selectedGameId !== null) {
+      showReaderError(`Could not replace the source: ${library.error}`);
+    }
+  });
   sourceInput.value = "";
+});
+
+clearSource.addEventListener("click", () => {
+  void library.clear().then(() => {
+    if (!library.error && library.source === null) {
+      closeReader();
+      resetListView();
+    } else if (library.error && selectedGameId !== null) {
+      showReaderError(`Could not clear the source: ${library.error}`);
+    }
+  });
 });
 
 searchInput.addEventListener("input", () => {
@@ -66,7 +87,7 @@ nextPage.addEventListener("click", () => {
 
 library.subscribe(() => {
   renderSource(library.source);
-  if (selectedGameId === null) renderGames();
+  if (selectedGameId === null && library.replacement === null) renderGames();
 });
 
 window.addEventListener("beforeunload", () => {
@@ -76,6 +97,7 @@ window.addEventListener("beforeunload", () => {
 setReaderMode(false);
 renderSource(library.source);
 renderGames();
+void library.ready();
 
 function renderSource(source: MobileSourceRecord | null): void {
   sourceName.textContent = source?.name ?? "No PGN source selected";
@@ -94,6 +116,13 @@ function renderSource(source: MobileSourceRecord | null): void {
   scanProgress.max = Math.max(1, progress?.bytesTotal ?? source?.size ?? 1);
   scanProgress.value = Math.min(progress?.bytesDone ?? 0, scanProgress.max);
   progressLabel.textContent = progressText(source);
+  clearSource.disabled = !source;
+
+  const replacement = library.replacement;
+  replacementStatus.hidden = !replacement;
+  replacementStatus.textContent = replacement ? replacementText(replacement) : "";
+  sourceError.hidden = !library.error;
+  sourceError.textContent = library.error ?? "";
 }
 
 function renderGames(): void {
@@ -200,6 +229,14 @@ function progressText(source: MobileSourceRecord | null): string {
   return `Scanning source... ${percent}% (${progress.gamesFound} found)`;
 }
 
+function replacementText(replacement: NonNullable<MobileLibrary["replacement"]>): string {
+  if (replacement.scan_status === "committing") return `Saving ${replacement.name}...`;
+  const progress = replacement.progress;
+  if (progress.bytesTotal === 0) return `Scanning ${replacement.name}...`;
+  const percent = Math.round((100 * progress.bytesDone) / progress.bytesTotal);
+  return `Scanning ${replacement.name}... ${percent}% (${progress.gamesFound} found)`;
+}
+
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -255,6 +292,18 @@ function closeReader(): void {
   activeReader = null;
   setReaderMode(false);
   renderGames();
+}
+
+function resetListView(): void {
+  query = "";
+  offset = 0;
+  searchInput.value = "";
+  renderGames();
+}
+
+function showReaderError(message: string): void {
+  readerPanel.querySelector(".replacement-error")?.remove();
+  readerPanel.prepend(h("p", { class: "reader-error replacement-error", role: "alert" }, message));
 }
 
 function setReaderMode(readerOpen: boolean): void {

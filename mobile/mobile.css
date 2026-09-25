@@ -96,6 +96,7 @@ h2 { font-size: 18px; line-height: 1.25; margin: 0; }
 .file-picker:focus-within { outline: 3px solid rgba(19, 115, 109, .25); outline-offset: 2px; }
 
 .section-heading { align-items: start; display: flex; gap: 12px; justify-content: space-between; }
+.source-actions { align-items: end; display: flex; flex-direction: column; gap: 8px; }
 .status {
   border: 1px solid var(--line);
   border-radius: 999px;
@@ -108,6 +109,15 @@ h2 { font-size: 18px; line-height: 1.25; margin: 0; }
 .status-scanning { border-color: var(--teal); color: var(--teal); }
 .status-ready { border-color: var(--good); color: var(--good); }
 .status-error { border-color: var(--bad); color: var(--bad); }
+.clear-source {
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  color: var(--muted);
+  font-size: 12px;
+  padding: 5px 8px;
+}
+.clear-source:not(:disabled):hover { border-color: var(--bad); color: var(--bad); }
 .source-stats {
   border-bottom: 1px solid var(--line);
   display: grid;
@@ -146,6 +156,7 @@ progress::-webkit-progress-bar { background: var(--inset); }
 progress::-webkit-progress-value { background: var(--teal); border-radius: 999px; }
 progress::-moz-progress-bar { background: var(--teal); border-radius: 999px; }
 .progress-label { color: var(--muted); font-size: 13px; margin: 7px 0 0; }
+.replacement-status { color: var(--teal); font-size: 13px; margin: 7px 0 0; }
 .source-error { color: var(--bad); font-size: 13px; margin: 9px 0 0; }
 
 .records-heading { align-items: baseline; }
