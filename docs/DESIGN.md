@@ -9,6 +9,7 @@ Status: v1.1.0 · Date: 2026-08-09 · Audience: solo maintainer
 **In scope (v1)**
 
 - Fully offline local web app: Node.js/TypeScript backend + browser UI served at `http://127.0.0.1:8642`.
+- Standalone static mobile browser client: one local PGN source, browser Scan worker, and in-memory Mobile Library.
 - Register local PGN files (by path, by discovery in watch dirs, or by upload-copy into `library/`).
 - Streaming index of arbitrarily large PGN files: game boundaries, byte offsets, headers → SQLite.
 - Lazy hydration of a single game by byte span into a full-fidelity move-tree document.
@@ -46,6 +47,7 @@ search.
 | Board state | **Server computes FEN per node during hydration** | UI never replays moves; every node carries its position. Costs response size (~100 bytes/node), saves all client-side chess logic and repeated recomputation. |
 | Frontend | **Vanilla ES modules, no build step** | One dev, offline, no toolchain rot. ~1.5k lines of JS is well within no-framework territory. The board uses locally vendored CBurnett SVG pieces and inline graphics overlays. |
 | Concurrency | **`LibraryService` owns Scan lifecycle; `src/scan-worker.ts` is a narrow worker adapter** | Keeps API responsive during multi-GB scans; progress is polled via `GET /api/files/{id}`. The Index replacement is transactional, so a failed replacement leaves the previous index intact, while remove/reset/shutdown are guarded by the same lifecycle owner. |
+| Mobile Library | **`InMemoryMobileLibrary` owns one active source** | The mobile adapter projects the existing Game record vocabulary, receives browser-worker Scan events, bounds list pages to 50 records, and replaces the active source before starting a new Scan. Persistence and reader behavior remain later tickets. |
 | Source fidelity | **`src/source.ts` owns fingerprint and span access** | Original bytes are never rewritten; Index stores offsets and ordered Tag pairs; source responses decode the indexed span as UTF-8 only after bounded, race-checked reads. Parser normalization affects the document model only, and changed or missing sources are refused rather than served through stale offsets. |
 
 ## 4. Parser strategy
@@ -171,6 +173,8 @@ and `byte_size`.
   sidelines as indented, bordered sub-blocks (collapsible at depth ≥ 3); NAG glyphs attach to
   their move token. Current node highlighted and kept scrolled into view. The board uses local
   CBurnett SVG pieces and renders `[%cal]`/`[%csl]` graphics.
+- `/mobile/` — standalone static client: choose one `.pgn`, watch Scan status and progress, search
+  roster metadata, and page through at most 50 Game records at once.
 
 ## 9. Performance strategy
 
@@ -191,7 +195,9 @@ hydration, Index persistence, Scan lifecycle, projection, intake, Library action
 contracts, configuration, CLI behavior, and the ten-fixture behavior-contract suite. The contract
 suite uses `tests/fixtures/contract_manifest.json` and separate temporary SQLite files to verify
 scan records, schema columns, indexed offsets, wire casing, ordered Tag pairs, flat GameDocument
-nodes, source text, and route error envelopes. Playwright covers the browser workflow.
+nodes, source text, and route error envelopes. Playwright covers the desktop browser workflow;
+`tests/mobile` serves only the compiled static client and verifies the worker-backed import/list
+slice without the desktop server.
 
 ## 11. Release strategy
 

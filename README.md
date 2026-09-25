@@ -52,6 +52,20 @@ Open <http://127.0.0.1:8642> in your browser. Keep the terminal window open
 while you use the app; the local server runs there. Press `Ctrl+C` in that
 terminal when you want to stop it.
 
+### Try the mobile client
+
+The first mobile slice is a separate static browser build. It scans the one
+selected `.pgn` source in a Web Worker and does not connect to the desktop
+server or use the desktop Library index.
+
+```bash
+npm run build:mobile
+python3 -m http.server 8763 --bind 127.0.0.1 --directory mobile
+```
+
+Open <http://127.0.0.1:8763>. The static server is only needed to load browser
+modules and workers; no Node process is needed while using the mobile client.
+
 ### Read your first game
 
 1. Open the **Library** page. PGN sources in `samples/` and `library/` appear
@@ -197,6 +211,8 @@ Run these commands from the project folder:
 | Reset the local Index | `npm start -- reset` |
 | Show command help | `npm start -- --help` |
 | Start the development server | `npm run dev` |
+| Build the mobile client | `npm run build:mobile` |
+| Test the mobile client | `npm run test:mobile` |
 
 Running `npm start` with no subcommand uses the configured host and port. The
 `index` command skips an unchanged source that is already `ready`; `--force`
@@ -276,6 +292,8 @@ source areas are:
 ```
 frontend/            Browser interface (board, notation tree, Library)
 frontend/pieces/     Local CBurnett SVG chess pieces
+mobile/               Standalone static mobile client and generated build
+src/mobile/           In-memory Mobile Library and browser Scan worker
 src/server.ts        Fastify routes and static hosting
 src/library.ts       Library intake and Scan lifecycle
 src/scan-worker.ts   Background Scan worker adapter

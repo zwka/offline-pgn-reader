@@ -1,0 +1,199 @@
+:root {
+  --ink: #18211f;
+  --muted: #65716d;
+  --line: #d5ded9;
+  --paper: #f3f6f2;
+  --surface: #ffffff;
+  --inset: #edf2ef;
+  --accent: #c9573e;
+  --accent-dark: #9f3f2d;
+  --teal: #13736d;
+  --good: #287b56;
+  --warn: #9a6b17;
+  --bad: #ad3d4a;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+
+* { box-sizing: border-box; }
+html { min-width: 320px; background: var(--paper); }
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font: 15px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+button, input { font: inherit; }
+button { cursor: pointer; }
+button:disabled { cursor: default; opacity: .45; }
+
+.mobile-header {
+  align-items: center;
+  background: var(--ink);
+  color: #f4f7f3;
+  display: flex;
+  justify-content: space-between;
+  min-height: 52px;
+  padding: 0 max(18px, env(safe-area-inset-left)) 0 max(18px, env(safe-area-inset-right));
+}
+.brand { color: inherit; font-size: 16px; font-weight: 750; text-decoration: none; }
+.brand span { color: #a6c7bf; font-weight: 500; }
+.local-mark {
+  border: 1px solid #66847c;
+  border-radius: 999px;
+  color: #c1d7d1;
+  font-size: 11px;
+  letter-spacing: 0;
+  padding: 3px 9px;
+  text-transform: uppercase;
+}
+
+.mobile-main {
+  margin: 0 auto;
+  max-width: 760px;
+  padding: 20px 16px calc(28px + env(safe-area-inset-bottom));
+}
+.import-panel, .source-panel, .records-panel {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  margin-bottom: 14px;
+  padding: 18px;
+}
+.import-panel {
+  align-items: end;
+  display: flex;
+  gap: 18px;
+  justify-content: space-between;
+}
+.kicker {
+  color: var(--teal);
+  font-size: 11px;
+  font-weight: 750;
+  letter-spacing: 0;
+  margin: 0 0 4px;
+  text-transform: uppercase;
+}
+h1, h2 { letter-spacing: 0; }
+h1 { font-size: 23px; line-height: 1.15; margin: 0; }
+h2 { font-size: 18px; line-height: 1.25; margin: 0; }
+.panel-note { color: var(--muted); margin: 7px 0 0; }
+.file-picker {
+  background: var(--accent);
+  border: 1px solid var(--accent-dark);
+  border-radius: 6px;
+  color: #fff;
+  display: inline-block;
+  font-weight: 700;
+  padding: 10px 13px;
+  text-align: center;
+  white-space: nowrap;
+}
+.file-picker:hover { background: var(--accent-dark); }
+.file-picker input { height: 1px; opacity: 0; position: absolute; width: 1px; }
+.file-picker:focus-within { outline: 3px solid rgba(19, 115, 109, .25); outline-offset: 2px; }
+
+.section-heading { align-items: start; display: flex; gap: 12px; justify-content: space-between; }
+.status {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 750;
+  padding: 3px 9px;
+  text-transform: uppercase;
+}
+.status-scanning { border-color: var(--teal); color: var(--teal); }
+.status-ready { border-color: var(--good); color: var(--good); }
+.status-error { border-color: var(--bad); color: var(--bad); }
+.source-stats {
+  border-bottom: 1px solid var(--line);
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-top: 17px;
+  padding-bottom: 14px;
+}
+.source-stats div { min-width: 0; }
+.source-stats span, .metadata-grid dt, .record-number dt, .record-result dt {
+  color: var(--muted);
+  display: block;
+  font-size: 11px;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+.source-stats strong {
+  display: block;
+  font-family: var(--mono);
+  font-size: 13px;
+  margin-top: 3px;
+  overflow-wrap: anywhere;
+}
+progress {
+  appearance: none;
+  background: var(--inset);
+  border: 0;
+  border-radius: 999px;
+  display: block;
+  height: 7px;
+  margin-top: 15px;
+  overflow: hidden;
+  width: 100%;
+}
+progress::-webkit-progress-bar { background: var(--inset); }
+progress::-webkit-progress-value { background: var(--teal); border-radius: 999px; }
+progress::-moz-progress-bar { background: var(--teal); border-radius: 999px; }
+.progress-label { color: var(--muted); font-size: 13px; margin: 7px 0 0; }
+.source-error { color: var(--bad); font-size: 13px; margin: 9px 0 0; }
+
+.records-heading { align-items: baseline; }
+.list-summary { color: var(--muted); font-family: var(--mono); font-size: 12px; white-space: nowrap; }
+.search-label { color: var(--muted); display: block; font-size: 12px; margin: 17px 0 5px; }
+.metadata-search {
+  background: var(--inset);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--ink);
+  padding: 10px 11px;
+  width: 100%;
+}
+.metadata-search:focus { border-color: var(--teal); outline: 3px solid rgba(19, 115, 109, .16); }
+.record-list {
+  max-height: min(64vh, 720px);
+  overflow-y: auto;
+  padding-top: 12px;
+}
+.game-record {
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  margin-bottom: 9px;
+  padding: 12px;
+}
+.game-record:last-child { margin-bottom: 0; }
+.players { align-items: baseline; display: flex; gap: 8px; margin: 8px 0 10px; min-width: 0; }
+.players strong { overflow-wrap: anywhere; }
+.players span { color: var(--muted); font-size: 12px; }
+.record-number, .record-result { display: inline-block; margin-right: 14px; }
+.record-number dd, .record-result dd { margin: 1px 0 0; }
+.record-result dd { color: var(--teal); font-family: var(--mono); font-weight: 700; }
+.metadata-grid { display: grid; gap: 8px 14px; grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 0; }
+.metadata-grid div { min-width: 0; }
+.metadata-grid dd { margin: 1px 0 0; overflow-wrap: anywhere; }
+.pager { display: flex; gap: 9px; justify-content: flex-end; padding-top: 13px; }
+.pager button {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  color: var(--ink);
+  padding: 7px 11px;
+}
+.pager button:not(:disabled):hover { border-color: var(--teal); color: var(--teal); }
+
+@media (max-width: 560px) {
+  .mobile-header { padding-left: 14px; padding-right: 14px; }
+  .mobile-main { padding-left: 10px; padding-right: 10px; padding-top: 10px; }
+  .import-panel { align-items: stretch; flex-direction: column; gap: 14px; }
+  .file-picker { width: 100%; }
+  .source-panel, .records-panel, .import-panel { padding: 14px; }
+  .source-stats { gap: 8px; }
+  .metadata-grid { gap: 8px; }
+}

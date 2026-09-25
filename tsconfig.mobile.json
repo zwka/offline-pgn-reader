@@ -1,0 +1,16 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "outDir": "mobile/dist",
+    "rootDir": "src",
+    "declaration": false,
+    "sourceMap": false
+  },
+  "include": [
+    "src/byte-source.ts",
+    "src/browser-source.ts",
+    "src/scan.ts",
+    "src/mobile/**/*.ts"
+  ]
+}
