@@ -1,4 +1,4 @@
-# Validation Report — v1.1.0 (2026-08-09)
+# Validation Report — current release gate (2026-09-25)
 
 The final gate is `npm run test:all`: TypeScript type checking, Vitest,
 TypeScript behavior contracts, and Playwright browser tests. TypeScript is the

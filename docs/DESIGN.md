@@ -1,6 +1,6 @@
 # Offline PGN Reader — Design & Architecture Record
 
-Status: v1.1.0 · Date: 2026-08-09 · Audience: solo maintainer
+Status: current · Updated: 2026-09-25 · Audience: solo maintainer
 
 ---
 
