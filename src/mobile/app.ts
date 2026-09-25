@@ -6,7 +6,12 @@ import {
   type MobileScanWorker,
   type MobileSourceRecord,
 } from "./library.js";
+import { renderMobileReader, type MobileReaderHandle } from "./reader.js";
 
+const importPanel = getElement<HTMLElement>("import-panel");
+const sourcePanel = getElement<HTMLElement>("source-panel");
+const recordsPanel = getElement<HTMLElement>("records-panel");
+const readerPanel = getElement<HTMLElement>("reader-panel");
 const sourceName = getElement<HTMLElement>("source-name");
 const sourceStatus = getElement<HTMLElement>("source-status");
 const sourceSize = getElement<HTMLElement>("source-size");
@@ -28,10 +33,14 @@ const library: MobileLibrary = new InMemoryMobileLibrary(() =>
 
 let query = "";
 let offset = 0;
+let selectedGameId: number | null = null;
+let readerGeneration = 0;
+let activeReader: MobileReaderHandle | null = null;
 
 sourceInput.addEventListener("change", () => {
   const file = sourceInput.files?.[0];
   if (!file) return;
+  closeReader();
   query = "";
   offset = 0;
   searchInput.value = "";
@@ -57,10 +66,14 @@ nextPage.addEventListener("click", () => {
 
 library.subscribe(() => {
   renderSource(library.source);
-  renderGames();
+  if (selectedGameId === null) renderGames();
 });
 
-window.addEventListener("beforeunload", () => library.close());
+window.addEventListener("beforeunload", () => {
+  activeReader?.cleanup();
+  library.close();
+});
+setReaderMode(false);
 renderSource(library.source);
 renderGames();
 
@@ -103,14 +116,38 @@ function renderGames(): void {
 function renderGame(game: MobileGameRecord): HTMLElement {
   const record = document.createElement("article");
   record.className = "game-record";
+  record.tabIndex = 0;
+  record.setAttribute("role", "button");
+  record.setAttribute("aria-label", gameLabel(game));
   record.dataset.index = String(game.idx_in_file);
+  const open = () => openGame(game.id);
+  record.addEventListener("click", open);
+  record.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    open();
+  });
   record.append(
     labeledValue("Game", String(game.idx_in_file + 1), "record-number"),
     players(game.white, game.black),
     labeledValue("Result", game.result || "*", "record-result"),
     metadataGrid(game),
   );
+  if (game.warning) record.append(warningValue(game.warning));
   return record;
+}
+
+function warningValue(warning: string): HTMLElement {
+  const element = document.createElement("p");
+  element.className = "record-warning";
+  element.textContent = `Warning: ${warning}`;
+  return element;
+}
+
+function gameLabel(game: MobileGameRecord): string {
+  const white = game.white || "Unknown White";
+  const black = game.black || "Unknown Black";
+  return `Game ${game.idx_in_file + 1}, ${white} versus ${black}`;
 }
 
 function players(white: string, black: string): HTMLElement {
@@ -168,6 +205,84 @@ function formatBytes(bytes: number): string {
   if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(1)} KB`;
   if (bytes < 1024 ** 3) return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
   return `${(bytes / 1024 ** 3).toFixed(2)} GB`;
+}
+
+function openGame(gameId: number): void {
+  selectedGameId = gameId;
+  const generation = ++readerGeneration;
+  activeReader?.cleanup();
+  activeReader = null;
+  setReaderMode(true);
+  readerPanel.replaceChildren(
+    loading("Opening Game record..."),
+  );
+
+  void loadGame(gameId, generation);
+}
+
+async function loadGame(gameId: number, generation: number): Promise<void> {
+  try {
+    const document = await library.getGameDocument(gameId);
+    if (generation !== readerGeneration || selectedGameId !== gameId) return;
+    const reader = await renderMobileReader(readerPanel, document, {
+      onBack: closeReader,
+      onNavigate: openGame,
+    });
+    if (generation !== readerGeneration || selectedGameId !== gameId) {
+      reader.cleanup();
+      return;
+    }
+    activeReader = reader;
+  } catch (error) {
+    if (generation !== readerGeneration || selectedGameId !== gameId) return;
+    const message = error instanceof Error ? error.message : String(error);
+    readerPanel.replaceChildren(
+      h("div", { class: "reader-error", role: "alert" }, `Could not open Game record: ${message}`),
+      h(
+        "button",
+        { class: "reader-back", type: "button" },
+        "Back to Game records",
+      ),
+    );
+    readerPanel.querySelector<HTMLButtonElement>(".reader-back")?.addEventListener("click", closeReader);
+  }
+}
+
+function closeReader(): void {
+  selectedGameId = null;
+  readerGeneration += 1;
+  activeReader?.cleanup();
+  activeReader = null;
+  setReaderMode(false);
+  renderGames();
+}
+
+function setReaderMode(readerOpen: boolean): void {
+  importPanel.hidden = readerOpen;
+  sourcePanel.hidden = readerOpen;
+  recordsPanel.hidden = readerOpen;
+  readerPanel.hidden = !readerOpen;
+}
+
+function loading(message: string): HTMLElement {
+  return h("div", { class: "loading" }, message);
+}
+
+function h<K extends keyof HTMLElementTagNameMap>(
+  tag: K,
+  attributes: Record<string, string> = {},
+  ...children: Array<Node | string | null>
+): HTMLElementTagNameMap[K] {
+  const element = document.createElement(tag);
+  for (const [name, value] of Object.entries(attributes)) {
+    if (name === "class") element.className = value;
+    else element.setAttribute(name, value);
+  }
+  for (const child of children.flat()) {
+    if (child == null) continue;
+    element.appendChild(typeof child === "string" ? document.createTextNode(child) : child);
+  }
+  return element;
 }
 
 function getElement<T extends HTMLElement>(id: string): T {

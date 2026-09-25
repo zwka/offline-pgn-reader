@@ -10,7 +10,7 @@
   },
   "scripts": {
     "build": "npm run typecheck && npm run build:mobile",
-    "build:mobile": "tsc -p tsconfig.mobile.json",
+    "build:mobile": "tsc -p tsconfig.mobile.json && node build-mobile.mjs",
     "dev": "tsx src/main.ts",
     "start": "tsx src/main.ts",
     "benchmark": "tsx benchmarks/scan.ts",

@@ -11,6 +11,7 @@
     "src/byte-source.ts",
     "src/browser-source.ts",
     "src/scan.ts",
+    "src/hydration.ts",
     "src/mobile/**/*.ts"
   ]
 }

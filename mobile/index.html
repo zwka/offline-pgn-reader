@@ -14,7 +14,7 @@
   </header>
 
   <main id="app" class="mobile-main">
-    <section class="import-panel" aria-labelledby="import-title">
+    <section id="import-panel" class="import-panel" aria-labelledby="import-title">
       <div>
         <p class="kicker">Mobile Library</p>
         <h1 id="import-title">One PGN source</h1>
@@ -26,7 +26,7 @@
       </label>
     </section>
 
-    <section class="source-panel" aria-labelledby="source-title">
+    <section id="source-panel" class="source-panel" aria-labelledby="source-title">
       <div class="section-heading">
         <div>
           <p class="kicker">Source</p>
@@ -44,7 +44,7 @@
       <p id="source-error" class="source-error" role="alert" hidden></p>
     </section>
 
-    <section class="records-panel" aria-labelledby="records-title">
+    <section id="records-panel" class="records-panel" aria-labelledby="records-title">
       <div class="section-heading records-heading">
         <div>
           <p class="kicker">Index</p>
@@ -66,8 +66,18 @@
         <button id="next-page" type="button" disabled>Next</button>
       </div>
     </section>
+
+    <section id="reader-panel" class="reader-panel" aria-label="Game reader" hidden></section>
   </main>
 
+  <script type="importmap">
+    {
+      "imports": {
+        "chess.js": "./dist/vendor/chess.js",
+        "chess.js/src/pgn.js": "./dist/vendor/pgn.js"
+      }
+    }
+  </script>
   <script type="module" src="./dist/mobile/app.js"></script>
 </body>
 </html>

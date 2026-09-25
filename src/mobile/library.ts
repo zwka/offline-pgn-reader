@@ -1,7 +1,11 @@
+import { BlobSource } from "../browser-source.js";
+import { hydrateGame } from "../hydration.js";
 import type { ScannedGame } from "../scan.js";
 import type { MobileScanMessage, MobileScanRequest } from "./scan-protocol.js";
+import type { GameDocument } from "../wire.js";
 
 export const MOBILE_PAGE_SIZE = 50;
+const MOBILE_MAX_GAME_BYTES = 8 * 1024 * 1024;
 
 export type MobileScanStatus = "pending" | "scanning" | "ready" | "error";
 
@@ -60,18 +64,25 @@ export type MobileScanWorker = {
 export type MobileScanWorkerFactory = () => MobileScanWorker;
 export type MobileLibraryListener = () => void;
 
+type MobileGameEntry = {
+  scanned: ScannedGame;
+  record: MobileGameRecord;
+};
+
 export interface MobileLibrary {
   readonly source: MobileSourceRecord | null;
 
   replaceSource(source: MobileSourceInput): void;
   listGames(query?: string, offset?: number, limit?: number): MobileGamePage;
+  getGameDocument(gameId: number): Promise<GameDocument>;
   subscribe(listener: MobileLibraryListener): () => void;
   close(): void;
 }
 
 export class InMemoryMobileLibrary implements MobileLibrary {
   private currentSource: MobileSourceRecord | null = null;
-  private games: MobileGameRecord[] = [];
+  private currentBlob: Blob | null = null;
+  private games: MobileGameEntry[] = [];
   private activeWorker: MobileScanWorker | null = null;
   private generation = 0;
   private readonly listeners = new Set<MobileLibraryListener>();
@@ -85,6 +96,7 @@ export class InMemoryMobileLibrary implements MobileLibrary {
   replaceSource(source: MobileSourceInput): void {
     this.stopActiveWorker();
     const generation = ++this.generation;
+    this.currentBlob = source.blob;
     this.games = [];
 
     const initial: MobileSourceRecord = {
@@ -135,7 +147,7 @@ export class InMemoryMobileLibrary implements MobileLibrary {
   listGames(query = "", offset = 0, limit = MOBILE_PAGE_SIZE): MobileGamePage {
     const search = query.trim().toLowerCase();
     const matching = search
-      ? this.games.filter((game) => searchableFields(game).some((field) => field.includes(search)))
+      ? this.games.filter(({ record }) => searchableFields(record).some((field) => field.includes(search)))
       : this.games;
     const normalizedOffset = Math.max(0, Math.trunc(offset));
     const normalizedLimit = Math.min(
@@ -146,7 +158,38 @@ export class InMemoryMobileLibrary implements MobileLibrary {
       total: matching.length,
       offset: normalizedOffset,
       limit: normalizedLimit,
-      games: matching.slice(normalizedOffset, normalizedOffset + normalizedLimit),
+      games: matching
+        .slice(normalizedOffset, normalizedOffset + normalizedLimit)
+        .map(({ record }) => record),
+    };
+  }
+
+  async getGameDocument(gameId: number): Promise<GameDocument> {
+    const source = this.currentBlob;
+    const sourceRecord = this.currentSource;
+    const entry = this.games.find(({ record }) => record.id === gameId);
+    if (!source || !sourceRecord) throw new Error("no PGN source selected");
+    if (!entry) throw new Error(`Game record ${gameId} was not found`);
+
+    const sourceBytes = await new BlobSource(source).readSpan(
+      entry.scanned.offsetStart,
+      entry.scanned.offsetEnd,
+      MOBILE_MAX_GAME_BYTES,
+    );
+    const extraWarnings = entry.record.warning ? [`index warning: ${entry.record.warning}`] : [];
+    const payload = hydrateGame(sourceBytes, entry.scanned.headers, extraWarnings);
+    const index = this.games.indexOf(entry);
+
+    return {
+      ...payload,
+      gameId: entry.record.id,
+      fileId: 1,
+      fileName: sourceRecord.name,
+      idxInFile: entry.record.idx_in_file,
+      neighbors: {
+        prev: index > 0 ? this.games[index - 1].record.id : null,
+        next: index + 1 < this.games.length ? this.games[index + 1].record.id : null,
+      },
     };
   }
 
@@ -158,6 +201,7 @@ export class InMemoryMobileLibrary implements MobileLibrary {
   close(): void {
     this.generation += 1;
     this.stopActiveWorker();
+    this.currentBlob = null;
     this.listeners.clear();
   }
 
@@ -170,7 +214,7 @@ export class InMemoryMobileLibrary implements MobileLibrary {
 
     if (message.type === "game") {
       const record = projectGameRecord(message.game);
-      this.games.push(record);
+      this.games.push({ scanned: message.game, record });
       this.currentSource = {
         ...this.currentSource,
         game_count: this.games.length,

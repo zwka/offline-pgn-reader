@@ -125,6 +125,68 @@ describe("in-memory Mobile Library", () => {
     expect(library.listGames("", 0, 500).games).toHaveLength(MOBILE_PAGE_SIZE);
     expect(library.listGames("Player 0").games[0].white).toBe("Player 0");
   });
+
+  it("hydrates one selected Game record from its retained Blob span", async () => {
+    const sourceText = [
+      '[Event "First"]',
+      '[White "One"]',
+      "",
+      "1. e4 *",
+      "",
+      '[Event "Second"]',
+      '[Event "Second duplicate"]',
+      '[White "Two"]',
+      '[SetUp "1"]',
+      '[FEN "1k6/1P3R2/8/8/8/8/r7/2K5 w - - 0 1"]',
+      "",
+      "1. Rf8+ Ka7 1-0",
+    ].join("\n");
+    const secondStart = sourceText.indexOf('[Event "Second"]');
+    const worker = new ManualWorker();
+    const library = new InMemoryMobileLibrary(() => worker);
+    library.replaceSource({ name: "selected.pgn", blob: new Blob([sourceText]) });
+    worker.send({
+      type: "game",
+      game: {
+        idxInFile: 0,
+        offsetStart: 0,
+        offsetEnd: secondStart,
+        headers: [["Event", "First"], ["White", "One"]],
+        warning: null,
+      },
+    });
+    worker.send({
+      type: "game",
+      game: {
+        idxInFile: 1,
+        offsetStart: secondStart,
+        offsetEnd: sourceText.length,
+        headers: [
+          ["Event", "Second"],
+          ["Event", "Second duplicate"],
+          ["White", "Two"],
+          ["SetUp", "1"],
+          ["FEN", "1k6/1P3R2/8/8/8/8/r7/2K5 w - - 0 1"],
+        ],
+        warning: null,
+      },
+    });
+    worker.send({ type: "complete" });
+
+    const document = await library.getGameDocument(2);
+
+    expect(document.headers).toEqual([
+      ["Event", "Second"],
+      ["Event", "Second duplicate"],
+      ["White", "Two"],
+      ["SetUp", "1"],
+      ["FEN", "1k6/1P3R2/8/8/8/8/r7/2K5 w - - 0 1"],
+    ]);
+    expect(document.nodes[0].fen).toBe("1k6/1P3R2/8/8/8/8/r7/2K5 w - - 0 1");
+    expect(document.nodes[1].san).toBe("Rf8+");
+    expect(document.neighbors).toEqual({ prev: 1, next: null });
+    expect(document.source).toBe(sourceText.slice(secondStart));
+  });
 });
 
 function gameMessage(event: string, opening = ""): MobileScanMessage {

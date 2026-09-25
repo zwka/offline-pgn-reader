@@ -133,7 +133,7 @@ export function hydrateGame(
   storedHeaders?: TagPair[],
   extraWarnings: string[] = [],
 ): GameDocumentPayload {
-  const source = Buffer.from(sourceBytes).toString("utf8");
+  const source = new TextDecoder("utf-8", { ignoreBOM: true }).decode(sourceBytes);
   const parseSource = source.startsWith("\ufeff") ? source.slice(1) : source;
   const headers = storedHeaders?.length ? copyHeaders(storedHeaders) : parseHeaders(parseSource);
   if (!source.trim()) throw new HydrationError("no PGN game found in source span");
