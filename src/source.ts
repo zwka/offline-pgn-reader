@@ -1,5 +1,13 @@
 import { createHash } from "node:crypto";
-import { closeSync, openSync, readSync, statSync } from "node:fs";
+import { closeSync, createReadStream, openSync, readSync, statSync } from "node:fs";
+
+import {
+  SourceSpanError,
+  type ByteSource,
+  validateSourceSpan,
+} from "./byte-source.js";
+
+export { SourceSpanError } from "./byte-source.js";
 
 const DEFAULT_SAMPLE_BYTES = 64 * 1024;
 
@@ -27,11 +35,24 @@ export class SourceChangedError extends Error {
   }
 }
 
-export class SourceSpanError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "SourceSpanError";
+export class FileByteSource implements ByteSource {
+  constructor(public readonly path: string) {}
+
+  get size(): number {
+    return sourceStats(this.path).size;
   }
+
+  stream(): AsyncIterable<Uint8Array> {
+    return createReadStream(this.path) as AsyncIterable<Uint8Array>;
+  }
+
+  readSpan(offsetStart: number, offsetEnd: number, maxBytes: number): Buffer {
+    return readSourceSpan(this.path, offsetStart, offsetEnd, maxBytes);
+  }
+}
+
+export function createFileSource(path: string): FileByteSource {
+  return new FileByteSource(path);
 }
 
 export function sourceStats(path: string): SourceStats {
@@ -113,12 +134,7 @@ export function readSourceSpan(
 }
 
 function validateSpan(offsetStart: number, offsetEnd: number, maxBytes: number): void {
-  const validOffsets = Number.isSafeInteger(offsetStart) && Number.isSafeInteger(offsetEnd);
-  if (!validOffsets || offsetStart < 0 || offsetEnd < offsetStart || offsetEnd - offsetStart > maxBytes) {
-    throw new SourceSpanError(
-      `invalid game span: ${offsetStart}..${offsetEnd} (max ${maxBytes})`,
-    );
-  }
+  validateSourceSpan(offsetStart, offsetEnd, maxBytes);
 }
 
 function rawSourceStats(path: string): RawSourceStats {

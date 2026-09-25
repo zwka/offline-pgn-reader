@@ -50,8 +50,8 @@ search.
 
 ## 4. Parser strategy
 
-**Layer A — boundary scanner (`src/scanner.ts`), index time.**
-Binary chunk iteration with manual byte offset accounting, so offsets are exact regardless of encoding. State
+**Layer A — boundary scanner (`src/scan.ts`), index time.**
+The platform-neutral scanner consumes a `ByteSource` stream with manual byte offset accounting, so offsets are exact regardless of encoding. The filesystem-facing `src/scanner.ts` adapter keeps the existing path API, while `src/browser-source.ts` adapts a browser `File` or `Blob`. State
 machine: `GAP → TAGS → MOVETEXT → (tag line seen) → boundary`. Crucially it tracks *brace-comment
 state across lines* so a `[` at line start inside a multi-line `{comment}` is not misread as a new
 game. Handles UTF-8 BOM, CRLF, `%` escape lines, `;` rest-of-line comments. Tag pairs are extracted
@@ -61,9 +61,9 @@ never produce a valid tag section still become records (flagged `warning`) as lo
 attributable; garbage between games is attached to the following boundary decision, never crashes
 the scan.
 
-**Layer B — source access and hydrator (`src/source.ts`, `src/hydration.ts`), read time.** The
-source module checks the stored fingerprint, validates the bounded span, reads exactly
-`offset_end - offset_start` bytes, and checks the fingerprint again before returning. The
+**Layer B — source access and hydrator (`src/source.ts`, `src/browser-source.ts`, `src/hydration.ts`), read time.** The
+Node source adapter checks the stored fingerprint; both source adapters validate the bounded span and read exactly
+`offset_end - offset_start` bytes. The Node adapter checks the fingerprint again before returning. The
 hydrator decodes UTF-8 (`errors="replace"`) and feeds the span to chess.js. The parser yields
 the full recursive game tree: comments, starting comments, NAGs, variations, and
 `[FEN]/[SetUp]` starting positions. The tree is converted iteratively
