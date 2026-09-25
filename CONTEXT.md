@@ -28,6 +28,14 @@ _Avoid_: Header object, metadata map
 The managed collection of PGN sources and the game records discovered within them.
 _Avoid_: Database, repository
 
+**Mobile Library**:
+A separate Library mode for a mobile device containing exactly one active imported PGN source; importing another source replaces the active source. The source may contain any number of Game records. This constraint applies only to the Mobile Library; the desktop Library remains multi-source.
+_Avoid_: Mobile collection, mobile catalog
+
+**Imported source**:
+A PGN source selected by the user and taken into the Mobile Library for reading, independent of the source file's original device location.
+_Avoid_: Linked file, watched file
+
 **Scan**:
 The process of reading a PGN source to discover its games and update the library's index.
 _Avoid_: Import, parse
