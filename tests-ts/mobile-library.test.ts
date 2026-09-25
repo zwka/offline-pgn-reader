@@ -380,6 +380,35 @@ describe("persistent Mobile Library", () => {
     expect(library.error).toContain("clear quota exceeded");
   });
 
+  it("accepts a source at the exact 50 MiB boundary", async () => {
+    const storage = new MemoryMobileStorage();
+    const workers: ManualWorker[] = [];
+    const library = new PersistentMobileLibrary(() => {
+      const worker = new ManualWorker();
+      workers.push(worker);
+      return worker;
+    }, storage);
+    await library.ready();
+
+    const source = new Blob([new Uint8Array(MOBILE_MAX_SOURCE_BYTES)]);
+    const replacement = library.replaceSource({ name: "boundary.pgn", blob: source });
+    workers[0].send({
+      type: "game",
+      game: scannedGame(0, "", [["Event", "Boundary"]], null, 1),
+    });
+    workers[0].send({ type: "complete" });
+    await replacement;
+
+    expect(library.error).toBeNull();
+    expect(library.source).toMatchObject({
+      name: "boundary.pgn",
+      size: MOBILE_MAX_SOURCE_BYTES,
+      game_count: 1,
+      scan_status: "ready",
+    });
+    expect(storage.snapshot?.sourceBytes.byteLength).toBe(MOBILE_MAX_SOURCE_BYTES);
+  });
+
   it("accepts more than sixty Game records and can clear the persisted source", async () => {
     const storage = new MemoryMobileStorage();
     const workers: ManualWorker[] = [];

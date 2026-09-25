@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- **Mobile release gate**: Playwright coverage now runs the mobile PWA through
+  emulated Pixel 7 Chromium and iPhone 13 WebKit workflows, including Scan
+  progress, IndexedDB persistence, offline reload/cache restore, replacement
+  recovery, clear, search, touch reader controls, and the 50 MiB / 8 MiB safety
+  boundaries.
+- **Desktop workflow protection**: the acceptance suite explicitly keeps
+  multiple PGN sources available in the desktop Library. The mobile PWA remains
+  the phone target and its one-source rule does not apply to desktop.
+
 ## 1.1.0 — 2026-08-09
 
 - **TypeScript production cutover**: `npm start` now launches the Fastify /

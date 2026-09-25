@@ -54,9 +54,12 @@ terminal when you want to stop it.
 
 ### Try the mobile client
 
-The mobile client is a separate static browser build. It scans and persists one
-selected `.pgn` source in a Web Worker and browser storage; it does not connect
-to the desktop server or use the desktop Library index.
+The mobile client is the mobile PWA target: a separate static browser build
+that scans and persists one selected `.pgn` source in a Web Worker and browser
+storage. It does not connect to the desktop server or use the desktop Library
+index. A phone needs one initial online load over HTTPS, or installation while
+online, to receive the PWA shell and service-worker cache. After that setup,
+the persisted Mobile Library and Reader work offline.
 
 ```bash
 npm run build:mobile
@@ -69,7 +72,9 @@ For installation on a phone, publish the complete `mobile/` directory over
 HTTPS. The build includes Android Chrome/iOS Safari manifest metadata, local
 icons, and a versioned service-worker precache. Increment `CACHE_VERSION` in
 `build-mobile.mjs` for a release that should replace the cached application
-shell; the Mobile Library remains in IndexedDB across that update.
+shell; the Mobile Library remains in IndexedDB across that update. The mobile
+one-source rule applies only to this PWA. The desktop `npm start` Library still
+supports multiple PGN sources.
 
 ### Read your first game
 
@@ -276,13 +281,18 @@ npm run typecheck
 npm test
 npm run test:contracts
 npx playwright install chromium
+npx playwright install webkit
 npm run test:browser
+npm run test:mobile
 ```
 
-`npx playwright install chromium` is needed once for browser tests and may need
-internet access. `npm run test:all` runs type checking, contract tests,
-TypeScript tests, and browser tests together. The browser tests start an
-isolated server and do not use the default `data/` Index.
+The browser checks use Playwright Chromium. The mobile checks use emulated
+Pixel 7 Chromium and iPhone 13 WebKit; `npx playwright install webkit` is
+needed once for the WebKit project and may need internet access. These are
+browser emulations, not physical Android or iOS hardware. `npm run test:all`
+runs type checking, contract tests, TypeScript tests, desktop browser tests,
+and both mobile browser projects together. The browser tests start isolated
+servers and do not use the default `data/` Index.
 
 The production Scan benchmark can be run with:
 

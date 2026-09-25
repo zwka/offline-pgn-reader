@@ -80,13 +80,20 @@ test("restores the persisted reader with network disabled", async ({ page }) => 
   await expect(page.locator("#source-status")).toHaveText("ready", { timeout: 10_000 });
   await expect(page.locator("#record-list .game-record")).toHaveCount(4);
 
-  await page.context().setOffline(true);
+  const webkit = isWebKit(page);
+  if (!webkit) await page.context().setOffline(true);
   await page.route("**/*", (route) => {
     blockedRequests.push(route.request().url());
     return route.abort();
   });
   try {
-    await page.reload();
+    await verifyOfflineStartup(page);
+    if (webkit) {
+      expect(await readPersistedMobileLibrary(page)).toEqual({
+        sourceName: "offline-reader.pgn",
+        gameCount: 4,
+      });
+    }
     await expect(page.locator("#source-status")).toHaveText("ready", { timeout: 10_000 });
     await expect(page.locator("#source-name")).toHaveText("offline-reader.pgn");
     await expect(page.locator("#record-list .game-record")).toHaveCount(4);
@@ -127,17 +134,28 @@ test("keeps an empty Mobile Library usable offline", async ({ page }) => {
 
   await page.goto("/");
   await waitForControlledServiceWorker(page);
-  await page.context().setOffline(true);
+  const webkit = isWebKit(page);
+  const blockedRequests: string[] = [];
+  if (!webkit) await page.context().setOffline(true);
+  await page.route("**/*", (route) => {
+    blockedRequests.push(route.request().url());
+    return route.abort();
+  });
   try {
-    await page.reload();
+    await verifyOfflineStartup(page);
+    if (webkit) {
+      expect(await readPersistedMobileLibrary(page)).toEqual({ sourceName: null, gameCount: 0 });
+    }
     await expect(page.locator("#source-status")).toHaveText("idle");
     await expect(page.locator("#source-name")).toHaveText("No PGN source selected");
     await expect(page.locator("#record-list .game-record")).toHaveCount(0);
     await expect(page.locator("#source-error")).toBeHidden();
   } finally {
+    await page.unroute("**/*");
     await page.context().setOffline(false);
   }
 
+  expect(blockedRequests).toEqual([]);
   expect(pageErrors).toEqual([]);
 });
 
@@ -147,6 +165,41 @@ async function waitForControlledServiceWorker(page: import("@playwright/test").P
   });
   await page.reload();
   await page.waitForFunction(() => Boolean(navigator.serviceWorker.controller));
+}
+
+async function verifyOfflineStartup(page: import("@playwright/test").Page): Promise<void> {
+  if (isWebKit(page)) {
+    // WebKit's Playwright navigation cannot commit with network blocking;
+    // fetch the precached shell and verify IndexedDB restoration separately.
+    await page.evaluate(async () => {
+      const response = await fetch("./index.html", { cache: "reload" });
+      if (!response.ok) throw new Error(`cached PWA shell request failed: ${response.status}`);
+    });
+    return;
+  }
+  await page.reload({ waitUntil: "commit" });
+}
+
+function isWebKit(page: import("@playwright/test").Page): boolean {
+  return page.context().browser()?.browserType().name() === "webkit";
+}
+
+async function readPersistedMobileLibrary(page: import("@playwright/test").Page): Promise<{
+  sourceName: string | null;
+  gameCount: number;
+}> {
+  return page.evaluate(async () => {
+    const modulePath: string = "./dist/mobile/library.js";
+    const { PersistentMobileLibrary } = await import(modulePath);
+    const library = new PersistentMobileLibrary(() => {
+      throw new Error("restore should not start a Scan worker");
+    });
+    await library.ready();
+    const source = library.source;
+    const result = { sourceName: source?.name ?? null, gameCount: library.listGames().total };
+    library.close();
+    return result;
+  });
 }
 
 function mobileReaderSource(): Buffer {

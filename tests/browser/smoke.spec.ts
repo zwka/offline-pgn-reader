@@ -62,6 +62,29 @@ test("uploads a managed copy and refreshes the Library without navigation", asyn
   await expect(page).toHaveURL(/\/$/);
 });
 
+test("keeps multiple sources available in the desktop Library", async ({ page }) => {
+  await page.goto("/");
+  const upload = page.locator('input[type="file"]');
+
+  await upload.setInputFiles({
+    name: "desktop-first-source.pgn",
+    mimeType: "application/x-chess-pgn",
+    buffer: Buffer.from('[Event "Desktop first"]\n[White "First"]\n\n1. e4 *\n'),
+  });
+  await expect(page.locator(".file-card").filter({ hasText: "desktop-first-source.pgn" }))
+    .toContainText("1 games", { timeout: 10_000 });
+
+  await page.locator('input[type="file"]').setInputFiles({
+    name: "desktop-second-source.pgn",
+    mimeType: "application/x-chess-pgn",
+    buffer: Buffer.from('[Event "Desktop second"]\n[White "Second"]\n\n1. d4 *\n'),
+  });
+  await expect(page.locator(".file-card").filter({ hasText: "desktop-second-source.pgn" }))
+    .toContainText("1 games", { timeout: 10_000 });
+  await expect(page.locator(".file-card").filter({ hasText: "desktop-first-source.pgn" })).toHaveCount(1);
+  await expect(page.locator(".file-card").filter({ hasText: "desktop-second-source.pgn" })).toHaveCount(1);
+});
+
 test("opens a source and browses paginated, searchable Game records", async ({ page }) => {
   const directory = mkdtempSync(join(tmpdir(), "offline-pgn-reader-browser-games-"));
   const source = join(directory, "browse.pgn");

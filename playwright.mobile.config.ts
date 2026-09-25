@@ -11,8 +11,17 @@ export default defineConfig({
   use: {
     baseURL,
     trace: "on-first-retry",
-    ...devices["Pixel 7"],
   },
+  projects: [
+    {
+      name: "android-chromium",
+      use: { ...devices["Pixel 7"] },
+    },
+    {
+      name: "ios-webkit",
+      use: { ...devices["iPhone 13"] },
+    },
+  ],
   webServer: {
     command: `npm run build:mobile && python3 -m http.server ${port} --bind 127.0.0.1 --directory mobile`,
     url: baseURL,
