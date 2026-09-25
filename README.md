@@ -55,11 +55,21 @@ terminal when you want to stop it.
 ### Try the mobile client
 
 The mobile client is the mobile PWA target: a separate static browser build
-that scans and persists one selected `.pgn` source in a Web Worker and browser
-storage. It does not connect to the desktop server or use the desktop Library
-index. A phone needs one initial online load over HTTPS, or installation while
-online, to receive the PWA shell and service-worker cache. After that setup,
-the persisted Mobile Library and Reader work offline.
+that scans and persists exactly one active, selected `.pgn` source in a Web
+Worker and a versioned IndexedDB Mobile Library. It does not connect to the
+desktop server or use the desktop Library Index. A phone needs one initial
+online load over HTTPS, or installation while online, to receive the PWA shell
+and service-worker cache. After that setup, the persisted Mobile Library and
+Reader work offline.
+
+The mobile source limit is 50 MiB and the per-GameDocument safety limit is 8
+MiB. Game records have no artificial total-count limit; the list renders at
+most 50 records per page. Replacing an active source requires confirmation,
+scans the candidate separately, and promotes it only after its IndexedDB
+snapshot is saved. A cancelled, failed, oversized, or storage-failing
+replacement leaves the previous source active. The mobile Reader retains
+custom FEN starts, Variations, comments, NAGs, graphics, ordered duplicate Tag
+pairs, warnings, the raw PGN source text, and adjacent-game navigation.
 
 ```bash
 npm run build:mobile
@@ -73,10 +83,11 @@ HTTPS. The build includes Android Chrome/iOS Safari manifest metadata, local
 icons, and a versioned service-worker precache. Increment `CACHE_VERSION` in
 `build-mobile.mjs` for a release that should replace the cached application
 shell; the Mobile Library remains in IndexedDB across that update. The mobile
-one-source rule applies only to this PWA. The desktop `npm start` Library still
-supports multiple PGN sources.
+one-source rule applies only to this PWA. The desktop `npm start` Library is
+the Node/Fastify/SQLite, filesystem-backed path and still supports multiple PGN
+sources.
 
-### Read your first game
+### Read your first desktop game
 
 1. Open the **Library** page. PGN sources in `samples/` and `library/` appear
    automatically.
@@ -197,10 +208,12 @@ readable; open it and check the warning details or **Raw PGN source**. If the
 source still exists but was edited or replaced, run **Re-scan** first. If it was
 moved or renamed, use **Remove** and add the new path.
 
-One game record can be read only up to the default 8 MiB safety limit. A
+One desktop Game record can be read only up to the default 8 MiB safety limit. A
 malformed source with an unterminated comment can make several games look like
-one very large record. Correct the PGN source, or increase the limit with
-`PGNREADER_MAX_GAME_BYTES` as described in [Configuration](#configuration).
+one very large record. Correct the PGN source, or increase the desktop limit
+with `PGNREADER_MAX_GAME_BYTES` as described in [Configuration](#configuration).
+The mobile PWA always enforces its 8 MiB GameDocument limit and its 50 MiB
+source limit; `PGNREADER_MAX_GAME_BYTES` does not change those limits.
 
 ### I used **Reset Library** or **Remove**
 
@@ -221,7 +234,9 @@ Run these commands from the project folder:
 | Reset the local Index | `npm start -- reset` |
 | Show command help | `npm start -- --help` |
 | Start the development server | `npm run dev` |
+| Typecheck and build generated artifacts | `npm run build` |
 | Build the mobile client | `npm run build:mobile` |
+| Run the complete release gate | `npm run test:all` |
 | Test the mobile client | `npm run test:mobile` |
 
 Running `npm start` with no subcommand uses the configured host and port. The
@@ -232,6 +247,8 @@ currently has no effect.
 
 ## Configuration
 
+These settings apply to the desktop Node/Fastify/SQLite server. The mobile PWA
+uses its browser IndexedDB Mobile Library instead of these filesystem settings.
 All settings are optional. Set them in the environment before starting the
 server or running a command.
 
@@ -258,6 +275,10 @@ npm start -- serve --port 8643
 
 ## Files and backup
 
+The following file and Index operations describe the desktop server path. The
+mobile PWA stores its active source in browser IndexedDB and uses **Clear
+source** to remove it.
+
 `data/index.sqlite3` is a local Index derived from your PGN sources. It can be
 rebuilt at any time. Back up the PGN sources themselves; the Index is not the
 source of truth.
@@ -273,10 +294,12 @@ upgrade requires it.
 
 ## For developers
 
-The runtime is a single TypeScript process with a vanilla JavaScript browser
-interface. Run the checks with:
+The desktop runtime is a single TypeScript process with a vanilla JavaScript
+browser interface; the mobile client is a separately compiled static build. Run
+the checks with:
 
 ```bash
+npm run build
 npm run typecheck
 npm test
 npm run test:contracts
@@ -284,6 +307,7 @@ npx playwright install chromium
 npx playwright install webkit
 npm run test:browser
 npm run test:mobile
+npm run test:all
 ```
 
 The browser checks use Playwright Chromium. The mobile checks use emulated

@@ -28,6 +28,18 @@ _Avoid_: Header object, metadata map
 The managed collection of PGN sources and the game records discovered within them.
 _Avoid_: Database, repository
 
+**Mobile Library**:
+The browser-persisted Library used by the mobile PWA. It contains exactly one
+active PGN source and its Index/Game record data in a versioned IndexedDB
+snapshot.
+_Avoid_: Desktop Index when naming mobile state
+
+**Active source**:
+The PGN source currently committed in the Mobile Library and available to its
+Reader. A candidate replacement is not active until its Scan and snapshot save
+both succeed.
+_Avoid_: Replacement source for a candidate that has not been committed
+
 **Scan**:
 The process of reading a PGN source to discover its games and update the library's index.
 _Avoid_: Import, parse
