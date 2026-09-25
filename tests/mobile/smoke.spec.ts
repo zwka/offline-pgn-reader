@@ -147,11 +147,17 @@ test("replaces the active Mobile Library source", async ({ page }) => {
   });
   await expect(page.locator("#source-status")).toHaveText("ready", { timeout: 10_000 });
 
+  const replacementDialog = page.waitForEvent("dialog").then(async (dialog) => {
+    expect(dialog.type()).toBe("confirm");
+    expect(dialog.message()).toContain("first.pgn");
+    await dialog.accept();
+  });
   await page.locator("#source-input").setInputFiles({
     name: "replacement.pgn",
     mimeType: "application/x-chess-pgn",
     buffer: Buffer.from('[Event "Replacement"]\n[White "Two"]\n\n1. d4 *\n'),
   });
+  await replacementDialog;
 
   await expect(page.locator("#source-status")).toHaveText("ready", { timeout: 10_000 });
   await expect(page.locator("#source-name")).toHaveText("replacement.pgn");
@@ -170,21 +176,25 @@ test("keeps the active source after a failed replacement and recovers on retry",
   });
   await expect(page.locator("#source-status")).toHaveText("ready", { timeout: 10_000 });
 
+  const invalidReplacementDialog = page.waitForEvent("dialog").then((dialog) => dialog.accept());
   await page.locator("#source-input").setInputFiles({
     name: "not-a-pgn.txt",
     mimeType: "text/plain",
     buffer: Buffer.from("replacement failed"),
   });
+  await invalidReplacementDialog;
   await expect(page.locator("#source-error")).toContainText("ends in .pgn");
   await expect(page.locator("#source-name")).toHaveText("active-source.pgn");
   await expect(page.locator("#record-list .game-record")).toHaveCount(1);
   await expect(page.locator("#record-list")).toContainText("Kept");
 
+  const recoveredReplacementDialog = page.waitForEvent("dialog").then((dialog) => dialog.accept());
   await page.locator("#source-input").setInputFiles({
     name: "recovered-source.pgn",
     mimeType: "application/x-chess-pgn",
     buffer: Buffer.from('[Event "Recovered"]\n[White "New source"]\n\n1. d4 *\n'),
   });
+  await recoveredReplacementDialog;
   await expect(page.locator("#source-status")).toHaveText("ready", { timeout: 10_000 });
   await expect(page.locator("#source-name")).toHaveText("recovered-source.pgn");
   await expect(page.locator("#source-error")).toBeHidden();
@@ -216,13 +226,17 @@ test("accepts the 50 MiB source boundary and rejects oversized Game records", as
     }))).toEqual({ value: MOBILE_MAX_SOURCE_BYTES, max: MOBILE_MAX_SOURCE_BYTES });
     await expect(page.locator("#scan-progress-label")).toHaveText("Scan complete.");
 
+    const oversizedSourceDialog = page.waitForEvent("dialog").then((dialog) => dialog.accept());
     await page.locator("#source-input").setInputFiles(oversizedPath);
+    await oversizedSourceDialog;
     await expect(page.locator("#source-error")).toContainText("50 MiB");
     await expect(page.locator("#source-status")).toHaveText("ready");
     await expect(page.locator("#source-name")).toHaveText("source-boundary.pgn");
     await expect(page.locator("#record-list .game-record")).toHaveCount(1);
 
+    const oversizedGameDialog = page.waitForEvent("dialog").then((dialog) => dialog.accept());
     await page.locator("#source-input").setInputFiles(largeGamePath);
+    await oversizedGameDialog;
     await expect(page.locator("#source-error")).toContainText("8 MiB", { timeout: 30_000 });
     await expect(page.locator("#source-status")).toHaveText("ready");
     await expect(page.locator("#source-name")).toHaveText("source-boundary.pgn");

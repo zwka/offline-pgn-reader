@@ -44,6 +44,13 @@ let activeReader: MobileReaderHandle | null = null;
 sourceInput.addEventListener("change", () => {
   const file = sourceInput.files?.[0];
   if (!file) return;
+  const activeSource = library.source;
+  if (activeSource && !window.confirm(
+    `Replace the active PGN source "${activeSource.name}" with "${file.name}"?`,
+  )) {
+    sourceInput.value = "";
+    return;
+  }
   query = "";
   offset = 0;
   searchInput.value = "";
