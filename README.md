@@ -71,21 +71,58 @@ replacement leaves the previous source active. The mobile Reader retains
 custom FEN starts, Variations, comments, NAGs, graphics, ordered duplicate Tag
 pairs, warnings, the raw PGN source text, and adjacent-game navigation.
 
+For a local browser test, build the client and serve the generated `mobile/`
+directory over HTTP:
+
 ```bash
 npm run build:mobile
-python3 -m http.server 8763 --bind 127.0.0.1 --directory mobile
+python3 -m http.server 8431 --bind 127.0.0.1 --directory mobile
 ```
 
-Open <http://127.0.0.1:8763>. The static server is only needed to load browser
+Open <http://127.0.0.1:8431>. The static server is only needed to load browser
 modules and workers; no Node process is needed while using the mobile client.
-For installation on a phone, publish the complete `mobile/` directory over
-HTTPS. The build includes Android Chrome/iOS Safari manifest metadata, local
-icons, and a versioned service-worker precache. Increment `CACHE_VERSION` in
+
+To open the PWA on a phone, use a temporary HTTPS Cloudflare Quick Tunnel. The
+tunnel exposes the static mobile build, not the desktop server or its Library.
+
+1. Install `cloudflared`. On macOS with Homebrew, run:
+
+   ```bash
+   brew install cloudflared
+   ```
+
+   For other operating systems, use the installation method in [Cloudflare's
+   `cloudflared` documentation](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/).
+2. From the project folder, install dependencies if needed, build the client,
+   and start the static server:
+
+   ```bash
+   nvm use
+   npm install
+   npm run build:mobile
+   python3 -m http.server 8431 --bind 127.0.0.1 --directory mobile
+   ```
+
+   Leave this terminal running. `npm install` is needed only when the project
+   dependencies have not been installed yet or `package-lock.json` changes.
+3. In a second terminal, start the tunnel:
+
+   ```bash
+   cloudflared tunnel --url http://127.0.0.1:8431
+   ```
+
+4. Open the `https://...trycloudflare.com` URL printed by `cloudflared` in the
+   phone's browser. Leave both terminals running while the phone uses the
+   tunnel. The URL is temporary and can change when the tunnel restarts.
+
+The build includes Android Chrome/iOS Safari manifest metadata, local icons, and
+a versioned service-worker precache. Increment `CACHE_VERSION` in
 `build-mobile.mjs` for a release that should replace the cached application
-shell; the Mobile Library remains in IndexedDB across that update. The mobile
-one-source rule applies only to this PWA. The desktop `npm start` Library is
-the Node/Fastify/SQLite, filesystem-backed path and still supports multiple PGN
-sources.
+shell; the Mobile Library remains in IndexedDB across that update. For a
+permanent phone installation, publish the complete `mobile/` directory through
+any HTTPS host. The mobile one-source rule applies only to this PWA. The
+desktop `npm start` Library is the Node/Fastify/SQLite, filesystem-backed path
+and still supports multiple PGN sources.
 
 ### Read your first desktop game
 
