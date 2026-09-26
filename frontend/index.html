@@ -4,6 +4,12 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Offline PGN Reader</title>
+  <script>
+    try {
+      const theme = localStorage.getItem("offline-pgn-reader-desktop-theme");
+      if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
+    } catch {}
+  </script>
   <link rel="stylesheet" href="/static/style.css">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%E2%99%9E%3C/text%3E%3C/svg%3E">
 </head>
@@ -13,6 +19,7 @@
     <nav id="breadcrumb" class="breadcrumb"></nav>
     <div class="topbar-right">
       <span id="health-dot" class="health-dot" title="backend status"></span>
+      <button id="theme-toggle" class="ghost-btn theme-toggle" type="button" title="Switch to light mode" aria-label="Switch to light mode" aria-pressed="true">☀</button>
       <button id="help-btn" class="ghost-btn" title="Keyboard shortcuts">?</button>
     </div>
   </header>

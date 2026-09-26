@@ -4,13 +4,17 @@
 
 const FILES = ["a", "b", "c", "d", "e", "f", "g", "h"];
 
-// Lichess brush palette for [%cal]/[%csl] graphics annotations.
-const SHAPE_COLORS = {
-  green: "#15781b",
-  red: "#882020",
-  yellow: "#e68f00",
-  blue: "#003088",
+// Theme-aware brush palette for [%cal]/[%csl] graphics annotations.
+const SHAPE_VARIABLES = {
+  green: "--shape-green",
+  red: "--shape-red",
+  yellow: "--shape-yellow",
+  blue: "--shape-blue",
 };
+
+function shapeColor(name) {
+  return `var(${SHAPE_VARIABLES[name] || SHAPE_VARIABLES.green})`;
+}
 
 function pieceUrl(fenChar) {
   const color = fenChar === fenChar.toUpperCase() ? "w" : "b";
@@ -52,7 +56,7 @@ export function renderBoard(board, fen, lastUci = null, shapes = null) {
   }
   const tints = new Map(); // square name -> css color
   for (const h of shapes?.highlights || []) {
-    tints.set(h.square, SHAPE_COLORS[h.color] || SHAPE_COLORS.green);
+    tints.set(h.square, shapeColor(h.color));
   }
 
   for (let row = 0; row < 8; row++) {
@@ -118,7 +122,7 @@ function buildArrowLayer(arrows, flipped) {
     const sx = x1 + ux * margin, sy = y1 + uy * margin;
     const tipX = x2 - ux * 0.06, tipY = y2 - uy * 0.06;
     const baseX = tipX - ux * headLen, baseY = tipY - uy * headLen;
-    const color = SHAPE_COLORS[a.color] || SHAPE_COLORS.green;
+    const color = shapeColor(a.color);
 
     const g = document.createElementNS(SVG_NS, "g");
     g.setAttribute("fill", color);

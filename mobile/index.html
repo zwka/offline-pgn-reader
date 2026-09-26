@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="light">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -15,7 +15,10 @@
 <body>
   <header class="mobile-header">
     <a class="brand" href="./">PGN Reader <span>Mobile</span></a>
-    <span class="local-mark">Local</span>
+    <div class="header-actions">
+      <button id="theme-toggle" class="theme-toggle" type="button" title="Switch to dark mode" aria-label="Switch to dark mode" aria-pressed="false">☾</button>
+      <span class="local-mark">Local</span>
+    </div>
   </header>
 
   <main id="app" class="mobile-main">

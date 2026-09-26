@@ -7,6 +7,40 @@ import { buildNotation, revealToken } from "./notation.js";
 const app = document.getElementById("app");
 const breadcrumb = document.getElementById("breadcrumb");
 const healthDot = document.getElementById("health-dot");
+const themeToggle = document.getElementById("theme-toggle");
+
+const THEME_KEY = "offline-pgn-reader-desktop-theme";
+const storedTheme = readTheme();
+let theme = storedTheme || "dark";
+
+function readTheme() {
+  try {
+    const value = localStorage.getItem(THEME_KEY);
+    return value === "light" || value === "dark" ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+function applyTheme(nextTheme, persist = true) {
+  theme = nextTheme;
+  document.documentElement.dataset.theme = theme;
+  const nextLabel = `Switch to ${theme === "dark" ? "light" : "dark"} mode`;
+  themeToggle.textContent = theme === "dark" ? "☀" : "☾";
+  themeToggle.title = nextLabel;
+  themeToggle.setAttribute("aria-label", nextLabel);
+  themeToggle.setAttribute("aria-pressed", String(theme === "dark"));
+  if (persist) {
+    try {
+      localStorage.setItem(THEME_KEY, theme);
+    } catch {
+      // The selected theme still applies for this page when storage is unavailable.
+    }
+  }
+}
+
+applyTheme(theme, false);
+themeToggle.addEventListener("click", () => applyTheme(theme === "dark" ? "light" : "dark"));
 
 let cleanupCurrentView = null;
 let viewGeneration = 0;

@@ -16,7 +16,12 @@ export async function renderMobileReader(
   doc: GameDocument,
   options: MobileReaderOptions,
 ): Promise<MobileReaderHandle> {
-  const boardHost = h("div", { class: "board-host" });
+  const boardHost = h("div", {
+    class: "board-host",
+    role: "region",
+    tabindex: "-1",
+    "aria-label": "Chess board",
+  });
   const board = createBoard(boardHost);
   const caption = h("p", { class: "move-caption", "aria-live": "polite" });
   const notationPane = h(
@@ -59,7 +64,7 @@ export async function renderMobileReader(
   const boardControls = h(
     "div",
     { class: "board-controls", "aria-label": "Reader controls" },
-    controlButton("Start", "start", () => selectNode(doc.rootId)),
+    controlButton("Start", "start", () => selectNode(doc.rootId, true)),
     controlButton("Back", "back", stepBack),
     controlButton("Forward", "forward", stepForward),
     controlButton("End", "end", toLineEnd),
@@ -117,7 +122,7 @@ export async function renderMobileReader(
       { class: "mobile-reader-layout" },
       h(
         "section",
-        { class: "board-column", "aria-label": "Chess board" },
+        { class: "board-column" },
         h("div", { class: "board-wrap" }, boardHost, boardControls, caption),
         metadata,
         warningPanel,
@@ -143,7 +148,7 @@ export async function renderMobileReader(
       ArrowLeft: stepBack,
       ArrowDown: () => cycleSibling(1),
       ArrowUp: () => cycleSibling(-1),
-      Home: () => selectNode(doc.rootId),
+      Home: () => selectNode(doc.rootId, true),
       End: toLineEnd,
       f: flip,
       p: () => rawButton.click(),
@@ -161,19 +166,22 @@ export async function renderMobileReader(
     cleanup: () => document.removeEventListener("keydown", onKey),
   };
 
-  function selectNode(id: number): void {
+  function selectNode(id: number, focusBoard = false): void {
     const node = doc.nodes[id];
     if (!node) return;
     const previous = notation?.nodeEls.get(currentId);
     previous?.classList.remove("current");
+    previous?.removeAttribute("aria-current");
     currentId = id;
     renderBoard(board, node.fen, node.uci, node);
     const token = notation?.nodeEls.get(id);
     if (token) {
       token.classList.add("current");
+      token.setAttribute("aria-current", "step");
       revealToken(token);
-      token.scrollIntoView({ block: "nearest", behavior: "auto" });
+      if (!focusBoard) token.scrollIntoView({ block: "nearest", behavior: "auto" });
     }
+    if (focusBoard) boardHost.focus();
     caption.textContent = node.san
       ? `${node.color === "w" ? `${node.moveNumber}.` : `${node.moveNumber}…`} ${node.san}${node.glyphs.join("")} - ply ${node.ply}`
       : "start position";
@@ -181,18 +189,18 @@ export async function renderMobileReader(
 
   function stepForward(): void {
     const node = doc.nodes[currentId];
-    if (node.children.length > 0) selectNode(node.children[0]);
+    if (node.children.length > 0) selectNode(node.children[0], true);
   }
 
   function stepBack(): void {
     const node = doc.nodes[currentId];
-    if (node.parentId != null) selectNode(node.parentId);
+    if (node.parentId != null) selectNode(node.parentId, true);
   }
 
   function toLineEnd(): void {
     let node = doc.nodes[currentId];
     while (node.children.length > 0) node = doc.nodes[node.children[0]];
-    selectNode(node.id);
+    selectNode(node.id, true);
   }
 
   function cycleSibling(direction: number): void {
@@ -201,7 +209,7 @@ export async function renderMobileReader(
     const siblings = doc.nodes[node.parentId].children;
     if (siblings.length < 2) return;
     const index = siblings.indexOf(node.id);
-    selectNode(siblings[(index + direction + siblings.length) % siblings.length]);
+    selectNode(siblings[(index + direction + siblings.length) % siblings.length], true);
   }
 
   function flip(): void {

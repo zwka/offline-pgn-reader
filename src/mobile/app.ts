@@ -30,6 +30,42 @@ const recordList = getElement<HTMLElement>("record-list");
 const listSummary = getElement<HTMLElement>("list-summary");
 const previousPage = getElement<HTMLButtonElement>("previous-page");
 const nextPage = getElement<HTMLButtonElement>("next-page");
+const themeToggle = getElement<HTMLButtonElement>("theme-toggle");
+const themeColorMeta = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]');
+
+type Theme = "light" | "dark";
+const THEME_KEY = "offline-pgn-reader-mobile-theme";
+let theme: Theme = readTheme() ?? "light";
+
+function readTheme(): Theme | null {
+  try {
+    const value = localStorage.getItem(THEME_KEY);
+    return value === "light" || value === "dark" ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+function applyTheme(nextTheme: Theme, persist = true): void {
+  theme = nextTheme;
+  document.documentElement.dataset.theme = theme;
+  const nextLabel = `Switch to ${theme === "dark" ? "light" : "dark"} mode`;
+  themeToggle.textContent = theme === "dark" ? "☀" : "☾";
+  themeToggle.title = nextLabel;
+  themeToggle.setAttribute("aria-label", nextLabel);
+  themeToggle.setAttribute("aria-pressed", String(theme === "dark"));
+  if (themeColorMeta) themeColorMeta.content = theme === "dark" ? "#0d1311" : "#18211f";
+  if (persist) {
+    try {
+      localStorage.setItem(THEME_KEY, theme);
+    } catch {
+      // The selected theme still applies for this page when storage is unavailable.
+    }
+  }
+}
+
+applyTheme(theme, false);
+themeToggle.addEventListener("click", () => applyTheme(theme === "dark" ? "light" : "dark"));
 
 const library: MobileLibrary = new PersistentMobileLibrary(() =>
   new Worker(new URL("./scan-worker.js", import.meta.url), { type: "module" }) as unknown as MobileScanWorker,

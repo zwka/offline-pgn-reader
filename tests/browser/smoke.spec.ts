@@ -16,6 +16,20 @@ test("loads the browser shell and reaches the Node health route", async ({ page 
   expect(await health.json()).toEqual({ status: "ok", version: "1.1.0", db: true });
 });
 
+test("switches the desktop theme and restores it after reload", async ({ page }) => {
+  await page.goto("/");
+
+  const toggle = page.getByRole("button", { name: "Switch to light mode" });
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  await toggle.click();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+  await expect(page.getByRole("button", { name: "Switch to dark mode" })).toBeVisible();
+
+  await page.reload();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+  await expect(page.getByRole("button", { name: "Switch to dark mode" })).toBeVisible();
+});
+
 test("shows a discovered source and registers it from the Library view", async ({ page }) => {
   await page.goto("/");
 
@@ -284,6 +298,12 @@ test("renders the annotation corpus on notation, warnings, and board graphics", 
     await expect(page.locator('.sq[data-square="d4"] .csl')).toHaveCount(1);
     await expect(page.locator('.sq[data-square="e5"] .csl')).toHaveCount(1);
     await expect(page.locator(".board-arrows line")).toHaveCount(1);
+    const darkArrowColor = await page.locator(".board-arrows g").first()
+      .evaluate((element) => getComputedStyle(element).fill);
+    await page.getByRole("button", { name: "Switch to light mode" }).click();
+    const lightArrowColor = await page.locator(".board-arrows g").first()
+      .evaluate((element) => getComputedStyle(element).fill);
+    expect(lightArrowColor).not.toBe(darkArrowColor);
 
     await page.locator(".notation .mv").filter({ hasText: "e4" }).click();
     await expect(page.locator('.sq[data-square="e4"] .csl')).toHaveCount(1);

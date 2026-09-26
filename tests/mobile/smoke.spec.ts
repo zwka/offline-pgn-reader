@@ -60,6 +60,20 @@ test("loads as a standalone static mobile client and imports one source", async 
   expect(apiRequests).toEqual([]);
 });
 
+test("switches the mobile theme and restores it after reload", async ({ page }) => {
+  await page.goto("/");
+
+  const toggle = page.getByRole("button", { name: "Switch to dark mode" });
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+  await toggle.click();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  await expect(page.getByRole("button", { name: "Switch to light mode" })).toBeVisible();
+
+  await page.reload();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  await expect(page.getByRole("button", { name: "Switch to light mode" })).toBeVisible();
+});
+
 test("restores the persisted Mobile Library after reload and clears it", async ({ page }) => {
   const source = Buffer.from([
     '[Event "Persistent mobile source"]',
@@ -310,12 +324,18 @@ test("opens Game records in the local reader with annotations, FEN starts, and n
     ["Result", "*"],
   ]);
 
-  await page.locator('[data-action="next-game"]').tap();
-  await expect(page.locator(".reader-title")).toContainText("Arrows");
-  await expect(page.locator('.board .sq[data-square="d4"] .csl')).toHaveCount(1);
-  await expect(page.locator('.board .sq[data-square="e5"] .csl')).toHaveCount(1);
-  await expect(page.locator(".board-arrows line")).toHaveCount(1);
-  await expect(page.locator(".variation .mv").first()).toContainText("c5");
+   await page.locator('[data-action="next-game"]').tap();
+   await expect(page.locator(".reader-title")).toContainText("Arrows");
+   await expect(page.locator('.board .sq[data-square="d4"] .csl')).toHaveCount(1);
+   await expect(page.locator('.board .sq[data-square="e5"] .csl')).toHaveCount(1);
+   await expect(page.locator(".board-arrows line")).toHaveCount(1);
+   const lightArrowColor = await page.locator(".board-arrows g").first()
+     .evaluate((element) => getComputedStyle(element).fill);
+   await page.getByRole("button", { name: "Switch to dark mode" }).click();
+   const darkArrowColor = await page.locator(".board-arrows g").first()
+     .evaluate((element) => getComputedStyle(element).fill);
+   expect(darkArrowColor).not.toBe(lightArrowColor);
+   await expect(page.locator(".variation .mv").first()).toContainText("c5");
   await page.locator(".variation .mv").filter({ hasText: "c5" }).first().click();
   await expect(page.locator(".notation-body .mv.current")).toContainText("c5");
   await expect(page.locator('.board .sq[data-square="c5"] .piece')).toHaveAttribute("alt", "p");
@@ -364,6 +384,36 @@ test("opens Game records in the local reader with annotations, FEN starts, and n
     contentOverlap: false,
   });
   expect(apiRequests).toEqual([]);
+});
+
+test("keeps mobile move controls focused on the board", async ({ page }) => {
+  const note = "A deliberately long study note keeps the notation pane scrollable. ".repeat(12);
+  const source = Buffer.from([
+    '[Event "Mobile focus"]',
+    '[White "White"]',
+    '[Black "Black"]',
+    '[Result "*"]',
+    "",
+    `{${note}} 1. e4 {${note}} e5 {${note}} 2. Nf3 {${note}} Nc6 {${note}} 3. Bb5 {${note}} a6 {${note}} 4. Ba4 *`,
+  ].join("\n"));
+
+  await page.goto("/");
+  await page.locator("#source-input").setInputFiles({
+    name: "mobile-focus.pgn",
+    mimeType: "application/x-chess-pgn",
+    buffer: source,
+  });
+  await expect(page.locator("#source-status")).toHaveText("ready", { timeout: 10_000 });
+  await page.locator("#record-list .game-record").click();
+  await expect(page.locator(".notation-body .mv")).toHaveCount(7);
+
+  const notation = page.locator(".mobile-notation");
+  await notation.evaluate((element) => { element.scrollTop = 0; });
+  await page.locator('[data-action="end"]').click();
+
+  await expect(page.locator(".notation-body .mv.current")).toContainText("Ba4");
+  expect(await page.evaluate(() => document.activeElement?.classList.contains("board"))).toBe(true);
+  expect(await notation.evaluate((element) => element.scrollTop)).toBe(0);
 });
 
 test("shows malformed-record warnings from the mobile GameDocument reader", async ({ page }) => {

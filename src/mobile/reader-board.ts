@@ -1,12 +1,16 @@
 import type { GameNode } from "../wire.js";
 
 const FILES = ["a", "b", "c", "d", "e", "f", "g", "h"];
-const SHAPE_COLORS: Record<string, string> = {
-  green: "#15781b",
-  red: "#882020",
-  yellow: "#e68f00",
-  blue: "#003088",
+const SHAPE_VARIABLES: Record<string, string> = {
+  green: "--shape-green",
+  red: "--shape-red",
+  yellow: "--shape-yellow",
+  blue: "--shape-blue",
 };
+
+function shapeColor(name: string): string {
+  return `var(${SHAPE_VARIABLES[name] || SHAPE_VARIABLES.green})`;
+}
 
 export type MobileBoard = {
   container: HTMLElement;
@@ -38,7 +42,7 @@ export function renderBoard(
   }
   const tints = new Map<string, string>();
   for (const highlight of node.highlights) {
-    tints.set(highlight.square, SHAPE_COLORS[highlight.color] || SHAPE_COLORS.green);
+    tints.set(highlight.square, shapeColor(highlight.color));
   }
 
   for (let row = 0; row < 8; row += 1) {
@@ -125,7 +129,7 @@ function buildArrowLayer(
     const tipY = y2 - uy * 0.06;
     const baseX = tipX - ux * headLength;
     const baseY = tipY - uy * headLength;
-    const color = SHAPE_COLORS[arrow.color] || SHAPE_COLORS.green;
+    const color = shapeColor(arrow.color);
 
     const group = document.createElementNS("http://www.w3.org/2000/svg", "g");
     group.setAttribute("fill", color);

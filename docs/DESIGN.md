@@ -178,7 +178,10 @@ Desktop uses these hash routes:
   CBurnett SVG pieces and renders `[%cal]`/`[%csl]` graphics.
 - `/mobile/` — standalone static client: choose one `.pgn`, confirm replacements, restore or clear
   the persisted source, watch Scan status and progress, search roster metadata, and page through
-  at most 50 Game records at once without a total-count cap.
+  at most 50 Game records at once without a total-count cap. Its persisted theme toggle changes the
+  complete surrounding UI palette while the standard wood square palette remains stable. In the
+  reader, control and keyboard move navigation keeps the board focused and leaves notation scroll
+  position unchanged; direct PGN token selection may scroll to that token.
 
 ## 9. Performance strategy
 
