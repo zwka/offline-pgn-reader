@@ -44,6 +44,9 @@ test("loads as a standalone static mobile client and imports one source", async 
   await page.goto("/");
   await expect(page).toHaveTitle("PGN Reader Mobile");
   await expect(page.locator("#source-status")).toHaveText("idle");
+  await expect(page.locator("#import-panel .panel-note")).toHaveText(
+    "Retain multiple local sources in your Mobile Library.",
+  );
 
   await page.locator("#source-input").setInputFiles({
     name: "mobile-study.pgn",

@@ -2,7 +2,7 @@
   "id": "./",
   "name": "PGN Reader Mobile",
   "short_name": "PGN Reader",
-  "description": "Read one persisted PGN source offline.",
+  "description": "Retain multiple PGN sources and read them offline.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

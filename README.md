@@ -55,13 +55,13 @@ terminal when you want to stop it.
 ### Try the mobile client
 
 The mobile client is the mobile PWA target: a separate static browser build
-that scans and persists imported `.pgn` sources in a Web Worker and a versioned
-IndexedDB Mobile Library. One retained source is active at a time, and the
-source list can be switched without opening a Game automatically. It does not
-connect to the desktop server or use the desktop Library Index. A phone needs
-one initial online load over HTTPS, or installation while online, to receive
-the PWA shell and service-worker cache. After that setup, the persisted Mobile
-Library and Reader work offline.
+that scans and persists multiple imported `.pgn` sources in a Web Worker and a
+versioned IndexedDB Mobile Library. One retained source is active at a time,
+and the source list can be switched without opening a Game automatically.
+It does not connect to the desktop server or use the desktop Library Index.
+A phone needs one initial online load over HTTPS, or installation while online,
+to receive the PWA shell and service-worker cache. After that setup, the
+persisted Mobile Library and Reader work offline.
 
 The mobile source limit is 50 MiB and the per-GameDocument safety limit is 8
 MiB. Game records have no artificial total-count limit; the list renders at
