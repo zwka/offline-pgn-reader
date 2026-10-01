@@ -26,6 +26,7 @@ const progressLabel = getElement<HTMLElement>("scan-progress-label");
 const replacementStatus = getElement<HTMLElement>("replacement-status");
 const sourceError = getElement<HTMLElement>("source-error");
 const sourceInput = getElement<HTMLInputElement>("source-input");
+const cancelIntake = getElement<HTMLButtonElement>("cancel-intake");
 const clearSource = getElement<HTMLButtonElement>("clear-source");
 const searchInput = getElement<HTMLInputElement>("metadata-search");
 const recordList = getElement<HTMLElement>("record-list");
@@ -97,6 +98,8 @@ sourceInput.addEventListener("change", () => {
   });
   sourceInput.value = "";
 });
+
+cancelIntake.addEventListener("click", () => library.cancelReplacement());
 
 clearSource.addEventListener("click", () => {
   const sourceId = library.activeSourceId;
@@ -231,6 +234,8 @@ function renderSource(source: MobileSourceRecord | null): void {
   const replacement = library.replacement;
   replacementStatus.hidden = !replacement;
   replacementStatus.textContent = replacement ? replacementText(replacement) : "";
+  cancelIntake.hidden = !replacement;
+  cancelIntake.disabled = replacement?.scan_status !== "scanning";
   sourceError.hidden = !library.error;
   sourceError.textContent = library.error ?? "";
 }
@@ -340,11 +345,11 @@ function progressText(source: MobileSourceRecord | null): string {
 }
 
 function replacementText(replacement: NonNullable<MobileLibrary["replacement"]>): string {
-  if (replacement.scan_status === "committing") return `Saving ${replacement.name}...`;
+  if (replacement.scan_status === "committing") return `Saving ${replacement.name} to the Mobile Library...`;
   const progress = replacement.progress;
-  if (progress.bytesTotal === 0) return `Scanning ${replacement.name}...`;
+  if (progress.bytesTotal === 0) return `Adding ${replacement.name}...`;
   const percent = Math.round((100 * progress.bytesDone) / progress.bytesTotal);
-  return `Scanning ${replacement.name}... ${percent}% (${progress.gamesFound} found)`;
+  return `Adding ${replacement.name}... ${percent}% (${progress.gamesFound} found)`;
 }
 
 function formatBytes(bytes: number): string {

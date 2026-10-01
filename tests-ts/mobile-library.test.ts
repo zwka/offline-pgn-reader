@@ -252,6 +252,7 @@ class MemoryMobileStorage implements MobileLibraryStorage {
   loadError: Error | null = null;
   saveError: Error | null = null;
   clearError: Error | null = null;
+  saveGate: Promise<void> | null = null;
 
   async load(): Promise<MobileStoredSnapshot | null> {
     if (this.loadError) throw this.loadError;
@@ -260,6 +261,7 @@ class MemoryMobileStorage implements MobileLibraryStorage {
 
   async save(snapshot: MobileLibrarySnapshot): Promise<void> {
     if (this.saveError) throw this.saveError;
+    if (this.saveGate) await this.saveGate;
     this.snapshot = snapshot;
   }
 
@@ -549,6 +551,15 @@ describe("persistent Mobile Library", () => {
     const firstText = '[Event "First"]\n\n1. e4 *\n';
     await completeReplacement(library, workers, "first.pgn", firstText);
 
+    const duplicate = library.replaceSource({
+      name: "FIRST.PGN",
+      blob: new Blob(['[Event "Different bytes"]\n\n1. d4 *\n']),
+    });
+    await duplicate;
+    expect(workers).toHaveLength(1);
+    expect(library.source?.name).toBe("first.pgn");
+    expect(library.error).toContain("already retained");
+
     const invalid = library.replaceSource({ name: "notes.txt", blob: new Blob(["invalid"]) });
     await invalid;
     expect(library.source?.name).toBe("first.pgn");
@@ -629,6 +640,55 @@ describe("persistent Mobile Library", () => {
     expect(library.source?.name).toBe("first.pgn");
     expect(library.listGames().games[0].event).toBe("First");
     expect(library.error).toContain("clear quota exceeded");
+  });
+
+  it("keeps the active source readable until the new source snapshot commits", async () => {
+    const storage = new MemoryMobileStorage();
+    const workers: ManualWorker[] = [];
+    const library = new PersistentMobileLibrary(() => {
+      const worker = new ManualWorker();
+      workers.push(worker);
+      return worker;
+    }, storage);
+    await library.ready();
+
+    const firstText = '[Event "First"]\n\n1. e4 *\n';
+    await completeReplacement(library, workers, "first.pgn", firstText);
+    const firstId = library.activeSourceId!;
+    const firstGameId = library.listGames().games[0].id;
+    const priorSnapshot = storage.snapshot;
+
+    let releaseSave!: () => void;
+    storage.saveGate = new Promise<void>((resolve) => {
+      releaseSave = resolve;
+    });
+
+    const secondText = '[Event "Second"]\n\n1. d4 *\n';
+    const second = library.replaceSource({ name: "second.pgn", blob: new Blob([secondText]) });
+    expect(library.activeSourceId).toBe(firstId);
+    expect(library.source?.name).toBe("first.pgn");
+    expect(await library.getGameDocument(firstGameId).then((document) => document.source)).toBe(firstText);
+
+    workers[1].send({
+      type: "game",
+      game: scannedGame(0, secondText, [["Event", "Second"]]),
+    });
+    workers[1].send({ type: "complete" });
+    await Promise.resolve();
+
+    expect(library.replacement).toMatchObject({ scan_status: "committing" });
+    expect(library.activeSourceId).toBe(firstId);
+    expect(library.source?.name).toBe("first.pgn");
+    expect(storage.snapshot).toBe(priorSnapshot);
+    expect(await library.getGameDocument(firstGameId).then((document) => document.source)).toBe(firstText);
+
+    releaseSave();
+    await second;
+
+    expect(library.source?.name).toBe("second.pgn");
+    expect(library.activeSourceId).toBe(2);
+    expect(library.replacement).toBeNull();
+    expect(library.listGames().games[0].event).toBe("Second");
   });
 
   it("accepts a source at the exact 50 MiB boundary", async () => {

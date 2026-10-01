@@ -160,15 +160,9 @@ export class InMemoryMobileLibrary implements MobileLibrary {
     const completion = new Promise<void>((resolve) => {
       resolveCompletion = resolve;
     });
-    if (!source.name.toLowerCase().endsWith(".pgn")) {
-      this.failWithoutReplacement("Choose a source whose name ends in .pgn.", resolveCompletion);
-      return completion;
-    }
-    if (!Number.isSafeInteger(source.blob.size) || source.blob.size > MOBILE_MAX_SOURCE_BYTES) {
-      this.failWithoutReplacement(
-        "This PGN source is too large. The maximum supported source size is 50 MiB.",
-        resolveCompletion,
-      );
+    const validationError = validateSourceInput(source, this.sourceStates.values());
+    if (validationError) {
+      this.failWithoutReplacement(validationError, resolveCompletion);
       return completion;
     }
 
@@ -536,16 +530,9 @@ export class PersistentMobileLibrary implements MobileLibrary {
       resolveCompletion = resolve;
     });
 
-    const name = source.name || "Untitled source";
-    if (!name.toLowerCase().endsWith(".pgn")) {
-      this.failWithoutReplacement("Choose a source whose name ends in .pgn.", resolveCompletion);
-      return completion;
-    }
-    if (!Number.isSafeInteger(source.blob.size) || source.blob.size > MOBILE_MAX_SOURCE_BYTES) {
-      this.failWithoutReplacement(
-        "This PGN source is too large. The maximum supported source size is 50 MiB.",
-        resolveCompletion,
-      );
+    const validationError = validateSourceInput(source, this.sourceStates.values());
+    if (validationError) {
+      this.failWithoutReplacement(validationError, resolveCompletion);
       return completion;
     }
 
@@ -820,11 +807,33 @@ function compareSources(left: MobileSourceRecord, right: MobileSourceRecord): nu
 function replacementStatus(pending: PendingMobileReplacement | null): MobileReplacementStatus | null {
   if (!pending) return null;
   return {
-    name: pending.input.name || "Untitled source",
+    name: sourceName(pending.input.name),
     size: pending.input.blob.size,
     scan_status: pending.phase,
     progress: { ...pending.progress },
   };
+}
+
+function validateSourceInput(
+  input: MobileSourceInput,
+  states: Iterable<MobileSourceState>,
+): string | null {
+  const name = sourceName(input.name);
+  if (!name.toLowerCase().endsWith(".pgn")) {
+    return "Choose a source whose name ends in .pgn.";
+  }
+  if (!Number.isSafeInteger(input.blob.size) || input.blob.size > MOBILE_MAX_SOURCE_BYTES) {
+    return "This PGN source is too large. The maximum supported source size is 50 MiB.";
+  }
+  const normalizedName = name.toLowerCase();
+  if ([...states].some(({ source }) => source.name.toLowerCase() === normalizedName)) {
+    return `A source named "${name}" is already retained in the Mobile Library.`;
+  }
+  return null;
+}
+
+function sourceName(name: string): string {
+  return name || "Untitled source";
 }
 
 function nextSourceId(states: Iterable<MobileSourceState>): number {
@@ -974,7 +983,7 @@ function readySourceRecord(
 ): MobileSourceRecord {
   return {
     id,
-    name: name || "Untitled source",
+    name: sourceName(name),
     size,
     game_count: games.length,
     warning_count: games.filter(({ record }) => record.warning !== null).length,

@@ -143,6 +143,7 @@ button:disabled { cursor: default; opacity: .45; }
   gap: 18px;
   justify-content: space-between;
 }
+.import-actions { align-items: end; display: flex; flex-wrap: wrap; gap: 8px; justify-content: end; }
 .kicker {
   color: var(--teal);
   font-size: 11px;
@@ -169,6 +170,15 @@ h2 { font-size: 18px; line-height: 1.25; margin: 0; }
 .file-picker:hover { background: var(--accent-dark); }
 .file-picker input { height: 1px; opacity: 0; position: absolute; width: 1px; }
 .file-picker:focus-within { outline: 3px solid var(--focus-soft); outline-offset: 2px; }
+.cancel-intake {
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  padding: 10px 11px;
+}
+.cancel-intake:not(:disabled):hover { border-color: var(--bad); color: var(--bad); }
 
 .source-list-heading { align-items: baseline; display: flex; gap: 12px; justify-content: space-between; }
 .source-list { display: grid; gap: 8px; margin-top: 12px; }
@@ -343,7 +353,8 @@ progress::-moz-progress-bar { background: var(--teal); border-radius: 999px; }
   .mobile-header { padding-left: 14px; padding-right: 14px; }
   .mobile-main { padding-left: 10px; padding-right: 10px; padding-top: 10px; }
   .import-panel { align-items: stretch; flex-direction: column; gap: 14px; }
-  .file-picker { width: 100%; }
+  .import-actions { align-items: stretch; justify-content: stretch; }
+  .file-picker, .cancel-intake { flex: 1 1 0; }
   .source-panel, .records-panel, .import-panel { padding: 14px; }
   .source-stats { gap: 8px; }
   .metadata-grid { gap: 8px; }

@@ -28,10 +28,13 @@
         <h1 id="import-title">PGN sources</h1>
          <p class="panel-note">Add local sources to your Mobile Library.</p>
       </div>
-      <label class="file-picker" for="source-input">
-        Choose PGN source
-        <input id="source-input" type="file" accept=".pgn,application/x-chess-pgn">
-      </label>
+      <div class="import-actions">
+        <label class="file-picker" for="source-input">
+          Choose PGN source
+          <input id="source-input" type="file" accept=".pgn,application/x-chess-pgn">
+        </label>
+        <button id="cancel-intake" class="cancel-intake" type="button" hidden>Cancel add</button>
+      </div>
     </section>
 
     <section id="source-panel" class="source-panel" aria-labelledby="source-title">

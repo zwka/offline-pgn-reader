@@ -289,6 +289,44 @@ test("retains each source and reads the selected source offline", async ({ page 
   expect(pageErrors).toEqual([]);
 });
 
+test("keeps the retained snapshot when adding a source exceeds browser storage", async ({ page }) => {
+  await page.addInitScript(() => {
+    let writes = 0;
+    const originalPut = IDBObjectStore.prototype.put;
+    IDBObjectStore.prototype.put = function(this: IDBObjectStore, value: any, key?: IDBValidKey) {
+      writes += 1;
+      if (writes === 2) throw new DOMException("Quota exceeded", "QuotaExceededError");
+      return key === undefined
+        ? originalPut.call(this, value)
+        : originalPut.call(this, value, key);
+    } as typeof originalPut;
+  });
+
+  await page.goto("/");
+  await page.locator("#source-input").setInputFiles({
+    name: "quota-first.pgn",
+    mimeType: "application/x-chess-pgn",
+    buffer: Buffer.from('[Event "Quota first"]\n[White "Kept"]\n\n1. e4 *\n'),
+  });
+  await expect(page.locator("#source-status")).toHaveText("ready", { timeout: 10_000 });
+
+  await page.locator("#source-input").setInputFiles({
+    name: "quota-second.pgn",
+    mimeType: "application/x-chess-pgn",
+    buffer: Buffer.from('[Event "Quota second"]\n[White "Rejected"]\n\n1. d4 *\n'),
+  });
+  await expect(page.locator("#source-error")).toContainText("Could not save the Mobile Library", { timeout: 10_000 });
+  await expect(page.locator("#source-name")).toHaveText("quota-first.pgn");
+  await expect(page.locator("#record-list")).toContainText("Kept");
+  await expect(page.locator("#record-list")).not.toContainText("Rejected");
+  await expect(page.locator("#source-list .source-select-name")).toHaveText(["quota-first.pgn"]);
+
+  await page.reload();
+  await expect(page.locator("#source-name")).toHaveText("quota-first.pgn", { timeout: 10_000 });
+  await expect(page.locator("#record-list")).toContainText("Kept");
+  await expect(page.locator("#source-list .source-select-name")).toHaveText(["quota-first.pgn"]);
+});
+
 test("keeps an empty Mobile Library usable offline", async ({ page }) => {
   const pageErrors: string[] = [];
   page.on("pageerror", (error) => pageErrors.push(error.message));

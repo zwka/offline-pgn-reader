@@ -242,6 +242,15 @@ test("retains, orders, switches, removes, and restores Mobile Library sources", 
   await expect(page.getByRole("button", { name: "Select Alpha.pgn" })).toHaveAttribute("aria-current", "true");
   await expect(page.getByRole("button", { name: "Select zeta.pgn" })).not.toHaveAttribute("aria-current");
 
+  await page.locator("#source-input").setInputFiles({
+    name: "ZETA.PGN",
+    mimeType: "application/x-chess-pgn",
+    buffer: Buffer.from('[Event "Different bytes"]\n\n1. c4 *\n'),
+  });
+  await expect(page.locator("#source-error")).toContainText("already retained");
+  await expect(page.locator("#source-name")).toHaveText("Alpha.pgn");
+  await expect(page.locator("#source-list .source-select-name")).toHaveText(["Alpha.pgn", "zeta.pgn"]);
+
   await page.getByRole("button", { name: "Select zeta.pgn" }).click();
   await expect(page.locator("#source-name")).toHaveText("zeta.pgn");
   await expect(page.locator("#record-list")).toContainText("Zeta");
@@ -292,6 +301,31 @@ test("keeps retained sources after a failed import and recovers on retry", async
   await expect(page.locator("#record-list")).toContainText("New source");
   await expect(page.locator("#record-list")).not.toContainText("Kept");
   await expect(page.locator("#source-list .source-select-name")).toHaveText(["active-source.pgn", "recovered-source.pgn"]);
+});
+
+test("keeps the active source during a cancellable source add", async ({ page }) => {
+  await page.goto("/");
+  await page.locator("#source-input").setInputFiles({
+    name: "active-during-add.pgn",
+    mimeType: "application/x-chess-pgn",
+    buffer: Buffer.from('[Event "Active during add"]\n[White "Kept"]\n\n1. e4 *\n'),
+  });
+  await expect(page.locator("#source-status")).toHaveText("ready", { timeout: 10_000 });
+
+  await page.locator("#source-input").setInputFiles({
+    name: "cancelled-add.pgn",
+    mimeType: "application/x-chess-pgn",
+    buffer: cancellableSource(),
+  });
+  await expect(page.getByRole("button", { name: "Cancel add" })).toBeVisible({ timeout: 10_000 });
+  await expect(page.locator("#source-name")).toHaveText("active-during-add.pgn");
+  await expect(page.locator("#record-list")).toContainText("Kept");
+
+  await page.getByRole("button", { name: "Cancel add" }).click();
+  await expect(page.locator("#source-error")).toContainText("cancelled");
+  await expect(page.locator("#source-name")).toHaveText("active-during-add.pgn");
+  await expect(page.locator("#record-list .game-record")).toHaveCount(1);
+  await expect(page.locator("#source-list .source-select-name")).toHaveText(["active-during-add.pgn"]);
 });
 
 test("accepts the 50 MiB source boundary and rejects oversized Game records", async ({ page }, testInfo) => {
@@ -543,6 +577,11 @@ function sourceAtLimit(): Buffer {
 function sourceWithGameOverLimit(): Buffer {
   const prefix = Buffer.from('[Event "8 MiB boundary"]\n\n{');
   return Buffer.concat([prefix, Buffer.alloc(MOBILE_MAX_GAME_BYTES + 1 - prefix.byteLength, 0x78)]);
+}
+
+function cancellableSource(): Buffer {
+  const prefix = Buffer.from('[Event "Cancelled add"]\n\n{');
+  return Buffer.concat([prefix, Buffer.alloc(16 * 1024 * 1024, 0x78), Buffer.from("}\n")]);
 }
 
 async function phoneLayout(page: import("@playwright/test").Page): Promise<{
