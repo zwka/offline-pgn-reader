@@ -71,5 +71,5 @@ temporary data: removed
 ```
 
 The pre-cutover Python reference result remains recorded separately in
-`CHANGELOG.md` and `docs/VALIDATION.md`; it is not a TypeScript production
-measurement and should not be treated as a direct apples-to-apples comparison.
+`CHANGELOG.md`; it is not a TypeScript production measurement and should not be
+treated as a direct apples-to-apples comparison.

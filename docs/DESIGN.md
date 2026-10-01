@@ -1,6 +1,6 @@
 # Offline PGN Reader — Design & Architecture Record
 
-Status: current · Updated: 2026-09-25 · Audience: solo maintainer
+Status: current · Updated: 2026-10-02 · Audience: solo maintainer
 
 ---
 
@@ -9,7 +9,7 @@ Status: current · Updated: 2026-09-25 · Audience: solo maintainer
 **In scope (v1)**
 
 - Fully offline local web app: Node.js/TypeScript backend + browser UI served at `http://127.0.0.1:8642`.
-- Standalone static mobile browser client: retained copied PGN sources with one active selection, a browser Scan worker, and a versioned IndexedDB-backed Mobile Library. Its shell requires one initial online HTTPS load or installation before persisted reading works offline.
+- Standalone static mobile browser client: retained copied PGN sources with one active selection, a browser Scan worker, and a versioned (currently schema v3) IndexedDB-backed Mobile Library. Its shell requires one initial online HTTPS load or installation before persisted reading works offline.
 - Register local PGN files (by path, by discovery in watch dirs, or by upload-copy into `library/`).
 - Streaming index of arbitrarily large PGN files: game boundaries, byte offsets, headers → SQLite.
 - Lazy hydration of a single game by byte span into a full-fidelity move-tree document.
@@ -48,7 +48,7 @@ search.
 | Board state | **Server computes FEN per node during hydration** | UI never replays moves; every node carries its position. Costs response size (~100 bytes/node), saves all client-side chess logic and repeated recomputation. |
 | Frontend | **Desktop: vanilla ES modules with no build step; mobile: compiled static modules** | One dev, offline, no framework runtime. The desktop board uses locally vendored CBurnett SVG pieces and inline graphics overlays; the mobile build vendors the same pieces and its chess modules. |
 | Concurrency | **`LibraryService` owns Scan lifecycle; `src/scan-worker.ts` is a narrow worker adapter** | Keeps API responsive during multi-GB scans; progress is polled via `GET /api/files/{id}`. The Index replacement is transactional, so a failed replacement leaves the previous index intact, while remove/reset/shutdown are guarded by the same lifecycle owner. |
-| Mobile Library | **`PersistentMobileLibrary` with an IndexedDB snapshot** | The mobile adapter projects the existing Game record vocabulary, receives browser-worker Scan events, bounds list pages to 50 records without limiting the total, and stages an import separately from retained sources. One versioned IndexedDB record stores every source's bytes, metadata, spans, ordered Tag pairs, warnings, Index records, optional per-source Resume bookmark, and active-source selection; source selection, bookmark updates, and removal change only after the Mobile Library snapshot write succeeds. Sources over 50 MiB and GameDocument spans over 8 MiB are rejected, and failed or cancelled imports leave the retained snapshot intact. |
+| Mobile Library | **`PersistentMobileLibrary` with an IndexedDB snapshot** | The mobile adapter projects the existing Game record vocabulary, receives browser-worker Scan events, bounds list pages to 50 records without limiting the total, and stages an import separately from retained sources. One versioned IndexedDB record stores every source's Source name, bytes, metadata, spans, ordered Tag pairs, warnings, Index records, optional per-source Resume bookmark, and active-source selection; source selection, bookmark updates, and removal change only after the Mobile Library snapshot write succeeds. The current schema is v3 and migrates v1/v2 snapshots without inventing bookmarks. Sources over 50 MiB and GameDocument spans over 8 MiB are rejected, and failed or cancelled imports leave the retained snapshot intact. |
 | Source fidelity | **`src/source.ts` owns fingerprint and span access** | Original bytes are never rewritten; Index stores offsets and ordered Tag pairs; source responses decode the indexed span as UTF-8 only after bounded, race-checked reads. Parser normalization affects the document model only, and changed or missing sources are refused rather than served through stale offsets. |
 
 ## 4. Parser strategy
@@ -176,14 +176,15 @@ Desktop uses these hash routes:
   sidelines as indented, bordered sub-blocks (collapsible at depth ≥ 3); NAG glyphs attach to
   their move token. Current node highlighted and kept scrolled into view. The board uses local
   CBurnett SVG pieces and renders `[%cal]`/`[%csl]` graphics.
-- `/mobile/` — standalone static client: choose `.pgn` sources, restore or remove retained sources,
-  select the active source, and use each source's optional Continue action to open its Resume
-  bookmark from the starting position. It watches Scan status and progress, searches roster
-  metadata, and pages through at most 50 Game records at once without a total-count cap. Its
-  persisted theme toggle changes the complete surrounding UI palette while the standard wood
-  square palette remains stable. In the reader, control and keyboard move navigation keeps the
-  board focused and leaves notation scroll position unchanged; direct PGN token selection may
-  scroll to that token, but reader node and board state are not part of the Resume bookmark.
+- `/mobile/` — standalone static client: choose `.pgn` sources with case-insensitive unique
+  Source names, restore or remove retained sources, select the active source, and use each
+  source's optional Continue action to open its Resume bookmark from the starting position. It
+  watches Scan status and progress, searches roster metadata, and pages through at most 50 Game
+  records at once without a total-count cap. Its persisted theme toggle changes the complete
+  surrounding UI palette while the standard wood square palette remains stable. In the reader,
+  control and keyboard move navigation keeps the board focused and leaves notation scroll
+  position unchanged; direct PGN token selection may scroll to that token, but reader node and
+  board state are not part of the Resume bookmark.
 
 ## 9. Performance strategy
 
@@ -220,8 +221,11 @@ owns desktop source-byte protection, `LibraryService` owns desktop Scan coordina
 `ReaderProjection` owns desktop response translation. TypeScript CLI subcommands are `serve`,
 `index [--force] PATH...`, and `reset`. `npm run build` typechecks and builds the mobile
 artifacts; `npm run build:mobile` rebuilds the mobile TypeScript output, vendored chess modules,
-pieces, and service-worker precache. The desktop release gate is `npm run test:all`; the
-mobile-specific gate is `npm run test:mobile`. `data/` is disposable cache — backup is optional,
+pieces, and service-worker precache. The build currently uses
+`CACHE_VERSION = "v5"` and emits the matching service-worker cache; bump it in
+`build-mobile.mjs` and rebuild before publishing a release.
+The full release gate is `npm run test:all`; the mobile-specific gate is
+`npm run test:mobile`. `data/` is disposable cache — backup is optional,
 rebuild is one command.
 CHANGELOG.md tracks releases; schema version bump ⇒ automatic rebuild.
 

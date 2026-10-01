@@ -16,13 +16,16 @@
 - **Mobile PWA**: the standalone `mobile/` build scans a selected PGN source in
   a browser worker, lazily opens GameDocuments from retained source bytes, and
   serves an installable, versioned offline shell after its initial HTTPS load
-  or installation.
+  or installation. The current generated service-worker cache is
+  `offline-pgn-reader-mobile-v5`.
 - **Mobile Library safety**: the versioned IndexedDB snapshot keeps retained
-  source bytes, Index data, and the active-source selection together. Imports
-  are scanned and promoted atomically; failed, cancelled, oversized, or
-  storage-failing imports preserve the retained sources. Sources are limited
-  to 50 MiB and GameDocuments to 8 MiB, while the 50-record page size does not
-  cap the total record count.
+  source bytes, Index data, the active-source selection, and optional
+  per-source Resume bookmarks together. Imports are scanned and promoted
+  atomically; failed, cancelled, oversized, or storage-failing imports preserve
+  the retained sources. Sources are limited to 50 MiB and GameDocuments to
+  8 MiB, while the 50-record page size does not cap the total record count. The
+  current snapshot schema is v3; v1 and v2 snapshots migrate on restore without
+  inventing Resume bookmarks.
 - **Runtime cleanup**: the former Python/FastAPI rollback runtime was removed;
   TypeScript is the sole production runtime and verification authority.
 

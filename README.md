@@ -66,9 +66,12 @@ persisted Mobile Library and Reader work offline.
 The mobile source limit is 50 MiB and the per-GameDocument safety limit is 8
 MiB. Game records have no artificial total-count limit; the list renders at
 most 50 records per page. Imported sources are scanned separately and become
-active only after their IndexedDB Mobile Library snapshot is saved. A cancelled,
-failed, oversized, or storage-failing import leaves retained sources and the
-previous active selection unchanged. The mobile Reader retains
+active only after their source bytes have been read and their IndexedDB Mobile
+Library snapshot is saved. An imported source keeps its user-visible filename
+as its **Source name**; the name must end in `.pgn`, and retained names are
+unique case-insensitively. A cancelled, failed, oversized, or storage-failing
+import leaves retained sources and the previous active selection unchanged. The
+mobile Reader retains
 custom FEN starts, Variations, comments, NAGs, graphics, ordered duplicate Tag
 pairs, warnings, the raw PGN source text, and adjacent-game navigation.
 
@@ -117,11 +120,16 @@ tunnel exposes the static mobile build, not the desktop server or its Library.
    tunnel. The URL is temporary and can change when the tunnel restarts.
 
 The build includes Android Chrome/iOS Safari manifest metadata, local icons, and
-a versioned service-worker precache. Increment `CACHE_VERSION` in
-`build-mobile.mjs` for a release that should replace the cached application
-shell; the Mobile Library remains in IndexedDB across that update. For a
-permanent phone installation, publish the complete `mobile/` directory through
-any HTTPS host. The Mobile Library persistence applies only to this PWA. The
+a versioned service-worker precache. The current generated cache is
+`offline-pgn-reader-mobile-v5`. Increment `CACHE_VERSION` in
+`build-mobile.mjs` and rerun `npm run build:mobile` for a release that should
+replace the cached application shell; the Mobile Library remains in IndexedDB
+across that update. The current Mobile Library snapshot schema is v3. Snapshots
+from v1 (one source) and v2 (multiple sources without Resume bookmarks) migrate
+on restore; source bytes and Game records are retained, and older snapshots
+start with no Resume bookmarks. For a permanent phone installation, publish the
+complete `mobile/` directory through any HTTPS host. The Mobile Library
+persistence applies only to this PWA. The
 desktop `npm start` Library is the Node/Fastify/SQLite, filesystem-backed path
 and still supports multiple PGN sources.
 

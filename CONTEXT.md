@@ -31,7 +31,8 @@ _Avoid_: Database, repository
 **Mobile Library**:
 A browser-persisted Library mode for the mobile PWA containing retained
 imported PGN sources, zero or one active source, and each source's Index/Game
-record data in a versioned IndexedDB snapshot. Importing another valid source
+record data in a versioned IndexedDB snapshot. The current snapshot schema is
+v3; v1 and v2 snapshots migrate on restore. Importing another valid source
 retains existing sources and makes the imported source active. Sources may
 contain any number of Game records. This constraint applies only to the Mobile
 Library; the desktop Library remains multi-source.
@@ -40,6 +41,12 @@ _Avoid_: Mobile collection, mobile catalog, Desktop Index when naming mobile sta
 **Imported source**:
 A PGN source selected by the user and taken into the Mobile Library for reading, independent of the source file's original device location.
 _Avoid_: Linked file, watched file
+
+**Source name**:
+The user-visible filename retained for an Imported source. It is stored
+separately from the original device location; mobile imports require a `.pgn`
+suffix and reject a case-insensitive duplicate name.
+_Avoid_: Source path, linked file
 
 **Active source**:
 The PGN source currently selected from the retained sources in the Mobile

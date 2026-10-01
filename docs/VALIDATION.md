@@ -1,4 +1,4 @@
-# Validation Report — current release gate (2026-09-25)
+# Validation Report — current release gate (2026-10-02)
 
 The final gate is `npm run test:all`: TypeScript type checking, Vitest,
 TypeScript behavior contracts, and Playwright browser tests. TypeScript is the
@@ -25,8 +25,8 @@ HTTP wire responses, source spans, ordered Tag pairs, and GameDocument payloads.
 | 13 | Notation rendering | variation context loss, comment blobs, large trees | `tests/browser/smoke.spec.ts`, `frontend/notation.js` | Reader rendering and chunked large-document updates are covered |
 | 14 | Navigation correctness | wrong sibling cycling, dead ends | `tests/browser/smoke.spec.ts`, `tests/fixtures/variations.pgn` | Keyboard navigation follows the GameDocument tree |
 | 15 | Startup and shutdown | port conflicts, schema drift, dirty WAL | `tests-ts/health.test.ts`, `tests-ts/cli.test.ts`, `tests-ts/scan-lifecycle.test.ts`, `src/database.ts` | Health, schema, worker cleanup, reset, and recovery behavior are covered |
-| 16 | Mobile persistence and source collection | lost sources after reload, wrong active selection, partial import/removal, quota/schema failures, threshold regressions | `tests-ts/mobile-library.test.ts`, `tests/mobile/smoke.spec.ts`, `src/mobile/storage.ts` | IndexedDB collection restore, v1 migration, atomic import/selection/removal, failed import recovery, exact/over-limit 50 MiB and 8 MiB thresholds, and unbounded record counts are covered |
-| 17 | Mobile PWA installation and offline reading | missing shell/worker assets, invalid install metadata, network-dependent reader, discarded retained source on update | `tests/mobile/pwa.spec.ts`, `tests/mobile/smoke.spec.ts`, `playwright.mobile.config.ts`, `build-mobile.mjs`, `mobile/manifest.webmanifest`, `mobile/service-worker.js` | Emulated Pixel 7 Chromium covers true offline reload; iPhone 13 WebKit covers network-blocked cached-shell fetch and fresh IndexedDB restore because Playwright WebKit cannot commit a blocked reload. Both cover source selection, Scan progress, reader fidelity, touch layout, independent removal, and network-free source-specific reader data |
+| 16 | Mobile persistence and source collection | lost sources after reload, wrong active selection, partial import/removal, quota/schema failures, threshold regressions | `tests-ts/mobile-library.test.ts`, `tests/mobile/smoke.spec.ts`, `src/mobile/storage.ts` | IndexedDB schema v3 collection restore, v1/v2 migration, atomic import/selection/removal, failed import recovery, the exact 50 MiB boundary, over-limit 50 MiB and 8 MiB protections, and unbounded record counts are covered |
+| 17 | Mobile PWA installation and offline reading | missing shell/worker assets, invalid install metadata, network-dependent reader, discarded retained source on update | `tests/mobile/pwa.spec.ts`, `tests/mobile/smoke.spec.ts`, `playwright.mobile.config.ts`, `build-mobile.mjs`, `mobile/manifest.webmanifest`, `mobile/service-worker.js` | Emulated Pixel 7 Chromium covers the generated v5 precache and true offline reload; iPhone 13 WebKit covers network-blocked cached-shell fetch and fresh IndexedDB restore because Playwright WebKit cannot commit a blocked reload. Both cover source selection, Scan progress, reader fidelity, touch layout, independent removal, and network-free source-specific reader data |
 
 ## Behavior Contracts
 
