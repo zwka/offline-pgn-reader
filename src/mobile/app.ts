@@ -12,6 +12,8 @@ registerServiceWorker();
 
 const importPanel = getElement<HTMLElement>("import-panel");
 const sourcePanel = getElement<HTMLElement>("source-panel");
+const sourceList = getElement<HTMLElement>("source-list");
+const sourceListSummary = getElement<HTMLElement>("source-list-summary");
 const recordsPanel = getElement<HTMLElement>("records-panel");
 const readerPanel = getElement<HTMLElement>("reader-panel");
 const sourceName = getElement<HTMLElement>("source-name");
@@ -76,40 +78,32 @@ let offset = 0;
 let selectedGameId: number | null = null;
 let readerGeneration = 0;
 let activeReader: MobileReaderHandle | null = null;
+let observedActiveSourceId = library.activeSourceId;
 
 sourceInput.addEventListener("change", () => {
   const file = sourceInput.files?.[0];
   if (!file) return;
-  const activeSource = library.source;
-  if (activeSource && !window.confirm(
-    `Replace the active PGN source "${activeSource.name}" with "${file.name}"?`,
-  )) {
-    sourceInput.value = "";
-    return;
-  }
+  const previousActiveSourceId = library.activeSourceId;
   query = "";
   offset = 0;
   searchInput.value = "";
   void library.replaceSource({ name: file.name, blob: file }).then(() => {
     if (library.replacement !== null) return;
-    const active = library.source;
-    const committed = !library.error && active?.name === file.name && active.size === file.size;
-    if (committed) {
+    if (library.activeSourceId !== previousActiveSourceId) {
       closeReader();
     } else if (library.error && selectedGameId !== null) {
-      showReaderError(`Could not replace the source: ${library.error}`);
+      showReaderError(`Could not import the source: ${library.error}`);
     }
   });
   sourceInput.value = "";
 });
 
 clearSource.addEventListener("click", () => {
-  void library.clear().then(() => {
-    if (!library.error && library.source === null) {
-      closeReader();
-      resetListView();
-    } else if (library.error && selectedGameId !== null) {
-      showReaderError(`Could not clear the source: ${library.error}`);
+  const sourceId = library.activeSourceId;
+  if (sourceId === null) return;
+  void library.removeSource(sourceId).then(() => {
+    if (library.error && selectedGameId !== null) {
+      showReaderError(`Could not remove the source: ${library.error}`);
     }
   });
 });
@@ -131,7 +125,11 @@ nextPage.addEventListener("click", () => {
 });
 
 library.subscribe(() => {
+  const activeSourceChanged = library.activeSourceId !== observedActiveSourceId;
+  observedActiveSourceId = library.activeSourceId;
+  renderSourceList(library.sources);
   renderSource(library.source);
+  if (activeSourceChanged && selectedGameId !== null) closeReader();
   if (selectedGameId === null && library.replacement === null) renderGames();
 });
 
@@ -140,9 +138,55 @@ window.addEventListener("beforeunload", () => {
   library.close();
 });
 setReaderMode(false);
+renderSourceList(library.sources);
 renderSource(library.source);
 renderGames();
 void library.ready();
+
+function renderSourceList(sources: MobileSourceRecord[]): void {
+  sourceListSummary.textContent = sources.length === 0
+    ? "No sources"
+    : `${sources.length} source${sources.length === 1 ? "" : "s"}`;
+  sourceList.replaceChildren(...sources.map(renderSourceItem));
+}
+
+function renderSourceItem(source: MobileSourceRecord): HTMLElement {
+  const active = source.id === library.activeSourceId;
+  const select = h(
+    "button",
+    {
+      class: `source-select${active ? " source-select-active" : ""}`,
+      type: "button",
+      "aria-label": `Select ${source.name}`,
+      ...(active ? { "aria-current": "true" } : {}),
+    },
+    h("strong", { class: "source-select-name" }, source.name),
+    h("span", { class: "source-select-meta" }, `${source.game_count} Game record${source.game_count === 1 ? "" : "s"}`),
+    active ? h("span", { class: "source-active-mark" }, "Active") : null,
+  );
+  select.addEventListener("click", () => {
+    query = "";
+    offset = 0;
+    searchInput.value = "";
+    void library.selectSource(source.id);
+  });
+
+  const remove = h(
+    "button",
+    {
+      class: "source-remove",
+      type: "button",
+      "aria-label": `Remove ${source.name}`,
+      title: `Remove ${source.name}`,
+    },
+    "Remove",
+  );
+  remove.addEventListener("click", () => {
+    void library.removeSource(source.id);
+  });
+
+  return h("div", { class: `source-item${active ? " source-item-active" : ""}`, role: "listitem" }, select, remove);
+}
 
 function renderSource(source: MobileSourceRecord | null): void {
   sourceName.textContent = source?.name ?? "No PGN source selected";

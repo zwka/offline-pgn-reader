@@ -4,21 +4,22 @@
 
 - **Mobile release gate**: Playwright coverage now runs the mobile PWA through
   emulated Pixel 7 Chromium and iPhone 13 WebKit workflows, including Scan
-  progress, IndexedDB persistence, offline reload/cache restore, replacement
-  recovery, clear, search, touch reader controls, and the 50 MiB / 8 MiB safety
-  boundaries.
+  progress, multi-source IndexedDB persistence, offline reload/cache restore,
+  import recovery, independent removal, search, touch reader controls, and the
+  50 MiB / 8 MiB safety boundaries.
 - **Desktop workflow protection**: the acceptance suite explicitly keeps
-  multiple PGN sources available in the desktop Library. The mobile PWA remains
-  the phone target and its one-source rule does not apply to desktop.
+  multiple PGN sources available in the desktop Library. The mobile PWA now
+  retains multiple imported sources without changing the desktop path.
 - **Mobile PWA**: the standalone `mobile/` build scans a selected PGN source in
   a browser worker, lazily opens GameDocuments from retained source bytes, and
   serves an installable, versioned offline shell after its initial HTTPS load
   or installation.
-- **Mobile Library safety**: the versioned IndexedDB snapshot keeps exactly one
-  active source. Replacement is confirmed, scanned, and promoted atomically;
-  failed, cancelled, oversized, or storage-failing replacements preserve the
-  active source. Sources are limited to 50 MiB and GameDocuments to 8 MiB,
-  while the 50-record page size does not cap the total record count.
+- **Mobile Library safety**: the versioned IndexedDB snapshot keeps retained
+  source bytes, Index data, and the active-source selection together. Imports
+  are scanned and promoted atomically; failed, cancelled, oversized, or
+  storage-failing imports preserve the retained sources. Sources are limited
+  to 50 MiB and GameDocuments to 8 MiB, while the 50-record page size does not
+  cap the total record count.
 - **Runtime cleanup**: the former Python/FastAPI rollback runtime was removed;
   TypeScript is the sole production runtime and verification authority.
 

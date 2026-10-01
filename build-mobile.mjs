@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 const root = dirname(fileURLToPath(import.meta.url));
 const mobileDirectory = join(root, "mobile");
 const vendorDirectory = join(root, "mobile", "dist", "vendor");
-const CACHE_VERSION = "v2";
+const CACHE_VERSION = "v3";
 
 await mkdir(vendorDirectory, { recursive: true });
 await cp(

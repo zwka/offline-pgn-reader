@@ -29,9 +29,10 @@ The managed collection of PGN sources and the game records discovered within the
 _Avoid_: Database, repository
 
 **Mobile Library**:
-A browser-persisted Library mode for the mobile PWA containing exactly one
-active PGN source and its Index/Game record data in a versioned IndexedDB
-snapshot. Importing another source replaces the active source. The source may
+A browser-persisted Library mode for the mobile PWA containing retained
+imported PGN sources, zero or one active source, and each source's Index/Game
+record data in a versioned IndexedDB snapshot. Importing another valid source
+retains existing sources and makes the imported source active. Sources may
 contain any number of Game records. This constraint applies only to the Mobile
 Library; the desktop Library remains multi-source.
 _Avoid_: Mobile collection, mobile catalog, Desktop Index when naming mobile state
@@ -41,9 +42,9 @@ A PGN source selected by the user and taken into the Mobile Library for reading,
 _Avoid_: Linked file, watched file
 
 **Active source**:
-The PGN source currently committed in the Mobile Library and available to its
-Reader. A candidate replacement is not active until its Scan and snapshot save
-both succeed.
+The PGN source currently selected from the retained sources in the Mobile
+Library and available to its Reader, or no source when the selection is empty.
+A candidate import is not active until its Scan and snapshot save both succeed.
 _Avoid_: Replacement source for a candidate that has not been committed
 
 **Scan**:

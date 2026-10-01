@@ -25,8 +25,8 @@
     <section id="import-panel" class="import-panel" aria-labelledby="import-title">
       <div>
         <p class="kicker">Mobile Library</p>
-        <h1 id="import-title">One PGN source</h1>
-        <p class="panel-note">Select a local source to build its Game records.</p>
+        <h1 id="import-title">PGN sources</h1>
+         <p class="panel-note">Add local sources to your Mobile Library.</p>
       </div>
       <label class="file-picker" for="source-input">
         Choose PGN source
@@ -35,14 +35,22 @@
     </section>
 
     <section id="source-panel" class="source-panel" aria-labelledby="source-title">
+      <div class="source-list-heading">
+        <div>
+          <p class="kicker">Mobile Library</p>
+          <h2 id="source-list-title">Retained sources</h2>
+        </div>
+        <span id="source-list-summary" class="list-summary">No sources</span>
+      </div>
+      <div id="source-list" class="source-list" role="list" aria-labelledby="source-list-title"></div>
       <div class="section-heading">
         <div>
-          <p class="kicker">Source</p>
+          <p class="kicker">Active source</p>
           <h2 id="source-title"><span id="source-name">No PGN source selected</span></h2>
         </div>
         <div class="source-actions">
           <span id="source-status" class="status status-idle" role="status">idle</span>
-          <button id="clear-source" class="clear-source" type="button" disabled>Clear source</button>
+          <button id="clear-source" class="clear-source" type="button" disabled>Remove source</button>
         </div>
       </div>
       <div class="source-stats">

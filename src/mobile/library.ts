@@ -5,8 +5,10 @@ import type { MobileScanMessage, MobileScanRequest } from "./scan-protocol.js";
 import type { GameDocument } from "../wire.js";
 import {
   IndexedDbMobileStorage,
+  MOBILE_LEGACY_STORAGE_SCHEMA_VERSION,
   type MobileLibrarySnapshot,
   type MobileLibraryStorage,
+  type MobileStoredSnapshot,
 } from "./storage.js";
 
 export const MOBILE_PAGE_SIZE = 50;
@@ -22,6 +24,7 @@ export type MobileScanProgress = {
 };
 
 export type MobileSourceRecord = {
+  id: number;
   name: string;
   size: number;
   game_count: number;
@@ -82,13 +85,24 @@ type MobileGameEntry = {
   record: MobileGameRecord;
 };
 
+type MobileSourceState = {
+  source: MobileSourceRecord;
+  blob: Blob;
+  bytes?: ArrayBuffer;
+  games: MobileGameEntry[];
+};
+
 export interface MobileLibrary {
+  readonly sources: MobileSourceRecord[];
+  readonly activeSourceId: number | null;
   readonly source: MobileSourceRecord | null;
   readonly error: string | null;
   readonly replacement: MobileReplacementStatus | null;
 
   ready(): Promise<void>;
   replaceSource(source: MobileSourceInput): Promise<void>;
+  selectSource(sourceId: number): Promise<void>;
+  removeSource(sourceId: number): Promise<void>;
   clear(): Promise<void>;
   cancelReplacement(): void;
   listGames(query?: string, offset?: number, limit?: number): MobileGamePage;
@@ -98,25 +112,33 @@ export interface MobileLibrary {
 }
 
 export class InMemoryMobileLibrary implements MobileLibrary {
-  private currentSource: MobileSourceRecord | null = null;
-  private currentBlob: Blob | null = null;
-  private games: MobileGameEntry[] = [];
-  private activeWorker: MobileScanWorker | null = null;
-  private generation = 0;
+  private readonly sourceStates = new Map<number, MobileSourceState>();
+  private currentSourceId: number | null = null;
+  private pending: PendingMobileReplacement | null = null;
+  private lastError: string | null = null;
   private readonly listeners = new Set<MobileLibraryListener>();
 
   constructor(private readonly workerFactory: MobileScanWorkerFactory) {}
 
+  get sources(): MobileSourceRecord[] {
+    return sortedSources(this.sourceStates.values());
+  }
+
+  get activeSourceId(): number | null {
+    return this.currentSourceId;
+  }
+
   get source(): MobileSourceRecord | null {
-    return this.currentSource ? copySource(this.currentSource) : null;
+    const state = this.currentSourceId === null ? undefined : this.sourceStates.get(this.currentSourceId);
+    return state ? copySource(state.source) : null;
   }
 
   get error(): string | null {
-    return this.currentSource?.scan_error ?? null;
+    return this.lastError;
   }
 
   get replacement(): MobileReplacementStatus | null {
-    return null;
+    return replacementStatus(this.pending);
   }
 
   ready(): Promise<void> {
@@ -124,77 +146,94 @@ export class InMemoryMobileLibrary implements MobileLibrary {
   }
 
   replaceSource(source: MobileSourceInput): Promise<void> {
-    this.stopActiveWorker();
-    const generation = ++this.generation;
-    this.currentBlob = source.blob;
-    this.games = [];
+    this.cancelPending();
+    this.lastError = null;
+    let resolveCompletion!: () => void;
+    const completion = new Promise<void>((resolve) => {
+      resolveCompletion = resolve;
+    });
+    if (!source.name.toLowerCase().endsWith(".pgn")) {
+      this.failWithoutReplacement("Choose a source whose name ends in .pgn.", resolveCompletion);
+      return completion;
+    }
+    if (!Number.isSafeInteger(source.blob.size) || source.blob.size > MOBILE_MAX_SOURCE_BYTES) {
+      this.failWithoutReplacement(
+        "This PGN source is too large. The maximum supported source size is 50 MiB.",
+        resolveCompletion,
+      );
+      return completion;
+    }
 
-    const initial: MobileSourceRecord = {
-      name: source.name || "Untitled source",
-      size: source.blob.size,
-      game_count: 0,
-      warning_count: 0,
-      scan_status: "pending",
-      scan_error: null,
+    const pending: PendingMobileReplacement = {
+      input: source,
+      sourceId: nextSourceId(this.sourceStates.values()),
+      games: [],
+      worker: null,
+      phase: "scanning",
       progress: {
         bytesDone: 0,
         bytesTotal: source.blob.size,
         gamesFound: 0,
       },
+      completion,
+      resolve: resolveCompletion,
     };
-    this.currentSource = initial;
+    this.pending = pending;
     this.emit();
-
-    if (!source.name.toLowerCase().endsWith(".pgn")) {
-      this.fail(generation, "Choose a source whose name ends in .pgn.");
-      return Promise.resolve();
-    }
 
     let worker: MobileScanWorker;
     try {
       worker = this.workerFactory();
     } catch (error) {
-      this.fail(generation, errorMessage(error));
-      return Promise.resolve();
+      this.failPending(pending, errorMessage(error));
+      return completion;
     }
 
-    this.activeWorker = worker;
-    worker.onmessage = (event) => this.receive(generation, worker, event.data);
-    worker.onerror = (event) => this.fail(generation, event.message || "Scan worker failed.");
-    this.currentSource = {
-      ...initial,
-      scan_status: "scanning",
-    };
-    this.emit();
-
+    pending.worker = worker;
+    worker.onmessage = (event) => this.receive(pending, worker, event.data);
+    worker.onerror = (event) => this.failPending(pending, event.message || "Scan worker failed.");
     try {
       worker.postMessage({ type: "scan", source: source.blob });
     } catch (error) {
-      this.fail(generation, errorMessage(error));
+      this.failPending(pending, errorMessage(error));
     }
+    return completion;
+  }
+
+  selectSource(sourceId: number): Promise<void> {
+    if (!this.sourceStates.has(sourceId)) return Promise.resolve();
+    if (this.currentSourceId === sourceId) return Promise.resolve();
+    this.currentSourceId = sourceId;
+    this.lastError = null;
+    this.emit();
     return Promise.resolve();
   }
 
-  async clear(): Promise<void> {
-    this.generation += 1;
-    this.stopActiveWorker();
-    this.currentSource = null;
-    this.currentBlob = null;
-    this.games = [];
+  removeSource(sourceId: number): Promise<void> {
+    if (!this.sourceStates.delete(sourceId)) return Promise.resolve();
+    if (this.currentSourceId === sourceId) this.currentSourceId = null;
+    this.lastError = null;
     this.emit();
+    return Promise.resolve();
+  }
+
+  clear(): Promise<void> {
+    return this.currentSourceId === null
+      ? Promise.resolve()
+      : this.removeSource(this.currentSourceId);
   }
 
   cancelReplacement(): void {
-    this.generation += 1;
-    this.stopActiveWorker();
+    this.cancelPending("Source import cancelled.");
   }
 
   listGames(query = "", offset = 0, limit = MOBILE_PAGE_SIZE): MobileGamePage {
-    return listMobileGames(this.games, query, offset, limit);
+    return listMobileGames(activeGames(this.sourceStates, this.currentSourceId), query, offset, limit);
   }
 
   getGameDocument(gameId: number): Promise<GameDocument> {
-    return getMobileGameDocument(this.currentBlob, this.currentSource, this.games, gameId);
+    const state = this.currentSourceId === null ? undefined : this.sourceStates.get(this.currentSourceId);
+    return getMobileGameDocument(state?.blob ?? null, state?.source ?? null, state?.games ?? [], gameId);
   }
 
   subscribe(listener: MobileLibraryListener): () => void {
@@ -203,83 +242,89 @@ export class InMemoryMobileLibrary implements MobileLibrary {
   }
 
   close(): void {
-    this.generation += 1;
-    this.stopActiveWorker();
-    this.currentBlob = null;
+    this.cancelPending();
     this.listeners.clear();
   }
 
-  private receive(
-    generation: number,
-    worker: MobileScanWorker,
-    message: MobileScanMessage,
-  ): void {
-    if (generation !== this.generation || worker !== this.activeWorker || !this.currentSource) return;
+  private receive(pending: PendingMobileReplacement, worker: MobileScanWorker, message: MobileScanMessage): void {
+    if (this.pending !== pending || pending.worker !== worker || pending.phase !== "scanning") return;
 
     if (message.type === "game") {
+      const span = message.game.offsetEnd - message.game.offsetStart;
+      if (!validGameSpan(message.game, pending.input.blob.size)) {
+        this.failPending(pending, "The source contains an unreadable Game record span.");
+        return;
+      }
+      if (span > MOBILE_MAX_GAME_BYTES) {
+        this.failPending(pending, "A Game record exceeds the 8 MiB safety limit.");
+        return;
+      }
       const record = projectGameRecord(message.game);
-      this.games.push({ scanned: message.game, record });
-      this.currentSource = {
-        ...this.currentSource,
-        game_count: this.games.length,
-        warning_count: this.currentSource.warning_count + (record.warning ? 1 : 0),
-      };
+      pending.games.push({ scanned: message.game, record });
+      pending.progress.gamesFound = pending.games.length;
       this.emit();
       return;
     }
 
     if (message.type === "progress") {
-      this.currentSource = {
-        ...this.currentSource,
-        game_count: Math.max(this.games.length, message.gamesFound),
-        progress: {
-          bytesDone: Math.min(message.bytesDone, this.currentSource.size),
-          bytesTotal: this.currentSource.size,
-          gamesFound: Math.max(this.games.length, message.gamesFound),
-        },
+      pending.progress = {
+        bytesDone: Math.min(Math.max(0, message.bytesDone), pending.input.blob.size),
+        bytesTotal: pending.input.blob.size,
+        gamesFound: Math.max(pending.games.length, message.gamesFound),
       };
       this.emit();
       return;
     }
 
     if (message.type === "complete") {
-      this.currentSource = {
-        ...this.currentSource,
-        game_count: this.games.length,
-        scan_status: "ready",
-        scan_error: null,
-        progress: {
-          bytesDone: this.currentSource.size,
-          bytesTotal: this.currentSource.size,
-          gamesFound: this.games.length,
-        },
+      pending.phase = "committing";
+      pending.progress = {
+        bytesDone: pending.input.blob.size,
+        bytesTotal: pending.input.blob.size,
+        gamesFound: pending.games.length,
       };
-      this.activeWorker = null;
+      pending.worker = null;
       worker.terminate();
+      const games = assignGameIds(pending.games, nextGameId(this.sourceStates.values()));
+      const source = readySourceRecord(pending.sourceId, pending.input.name, pending.input.blob.size, games);
+      this.sourceStates.set(pending.sourceId, { source, blob: pending.input.blob, games });
+      this.currentSourceId = pending.sourceId;
+      this.pending = null;
+      pending.resolve();
       this.emit();
       return;
     }
 
-    this.fail(generation, message.error);
+    this.failPending(pending, message.error);
   }
 
-  private fail(generation: number, message: string): void {
-    if (generation !== this.generation || !this.currentSource) return;
-    const worker = this.activeWorker;
-    this.activeWorker = null;
+  private failWithoutReplacement(message: string, resolve: () => void): void {
+    this.lastError = message;
+    this.emit();
+    resolve();
+  }
+
+  private failPending(pending: PendingMobileReplacement, message: string): void {
+    if (this.pending !== pending || pending.phase !== "scanning") return;
+    this.pending = null;
+    const worker = pending.worker;
+    pending.worker = null;
     if (worker) worker.terminate();
-    this.currentSource = {
-      ...this.currentSource,
-      scan_status: "error",
-      scan_error: message,
-    };
+    this.lastError = message;
+    pending.resolve();
     this.emit();
   }
 
-  private stopActiveWorker(): void {
-    const worker = this.activeWorker;
-    this.activeWorker = null;
+  private cancelPending(message?: string): void {
+    const pending = this.pending;
+    if (!pending || pending.phase !== "scanning") return;
+    this.pending = null;
+    const worker = pending.worker;
+    pending.worker = null;
     if (worker) worker.terminate();
+    if (message) this.lastError = message;
+    pending.resolve();
+    this.emit();
   }
 
   private emit(): void {
@@ -289,6 +334,7 @@ export class InMemoryMobileLibrary implements MobileLibrary {
 
 type PendingMobileReplacement = {
   input: MobileSourceInput;
+  sourceId: number;
   games: MobileGameEntry[];
   worker: MobileScanWorker | null;
   phase: "scanning" | "committing";
@@ -298,9 +344,8 @@ type PendingMobileReplacement = {
 };
 
 export class PersistentMobileLibrary implements MobileLibrary {
-  private currentSource: MobileSourceRecord | null = null;
-  private currentBlob: Blob | null = null;
-  private games: MobileGameEntry[] = [];
+  private sourceStates = new Map<number, MobileSourceState>();
+  private currentSourceId: number | null = null;
   private pending: PendingMobileReplacement | null = null;
   private lastError: string | null = null;
   private initialized = false;
@@ -314,8 +359,17 @@ export class PersistentMobileLibrary implements MobileLibrary {
     this.initialization = this.restore();
   }
 
+  get sources(): MobileSourceRecord[] {
+    return sortedSources(this.sourceStates.values());
+  }
+
+  get activeSourceId(): number | null {
+    return this.currentSourceId;
+  }
+
   get source(): MobileSourceRecord | null {
-    return this.currentSource ? copySource(this.currentSource) : null;
+    const state = this.currentSourceId === null ? undefined : this.sourceStates.get(this.currentSourceId);
+    return state ? copySource(state.source) : null;
   }
 
   get error(): string | null {
@@ -323,13 +377,7 @@ export class PersistentMobileLibrary implements MobileLibrary {
   }
 
   get replacement(): MobileReplacementStatus | null {
-    if (!this.pending) return null;
-    return {
-      name: this.pending.input.name || "Untitled source",
-      size: this.pending.input.blob.size,
-      scan_status: this.pending.phase,
-      progress: { ...this.pending.progress },
-    };
+    return replacementStatus(this.pending);
   }
 
   ready(): Promise<void> {
@@ -347,25 +395,46 @@ export class PersistentMobileLibrary implements MobileLibrary {
     return this.startReplacement(source);
   }
 
+  selectSource(sourceId: number): Promise<void> {
+    if (!this.initialized) return this.initialization.then(() => this.selectSource(sourceId));
+    if (this.pending?.phase === "committing") {
+      return this.pending.completion.then(() => this.selectSource(sourceId));
+    }
+    if (!this.sourceStates.has(sourceId) || this.currentSourceId === sourceId) return Promise.resolve();
+    return this.persistSelection(sourceId);
+  }
+
+  removeSource(sourceId: number): Promise<void> {
+    if (!this.initialized) return this.initialization.then(() => this.removeSource(sourceId));
+    if (this.pending?.phase === "committing") {
+      return this.pending.completion.then(() => this.removeSource(sourceId));
+    }
+    this.cancelPending();
+    return this.removeStoredSource(sourceId);
+  }
+
   clear(): Promise<void> {
     if (!this.initialized) return this.initialization.then(() => this.clear());
     if (this.pending?.phase === "committing") {
       return this.pending.completion.then(() => this.clear());
     }
     this.cancelPending();
-    return this.clearStoredSource();
+    return this.currentSourceId === null
+      ? Promise.resolve()
+      : this.removeStoredSource(this.currentSourceId);
   }
 
   cancelReplacement(): void {
-    this.cancelPending("Source replacement cancelled.");
+    this.cancelPending("Source import cancelled.");
   }
 
   listGames(query = "", offset = 0, limit = MOBILE_PAGE_SIZE): MobileGamePage {
-    return listMobileGames(this.games, query, offset, limit);
+    return listMobileGames(activeGames(this.sourceStates, this.currentSourceId), query, offset, limit);
   }
 
   getGameDocument(gameId: number): Promise<GameDocument> {
-    return getMobileGameDocument(this.currentBlob, this.currentSource, this.games, gameId);
+    const state = this.currentSourceId === null ? undefined : this.sourceStates.get(this.currentSourceId);
+    return getMobileGameDocument(state?.blob ?? null, state?.source ?? null, state?.games ?? [], gameId);
   }
 
   subscribe(listener: MobileLibraryListener): () => void {
@@ -381,11 +450,20 @@ export class PersistentMobileLibrary implements MobileLibrary {
   private async restore(): Promise<void> {
     try {
       const snapshot = await this.storage.load();
-      if (snapshot) this.restoreSnapshot(snapshot);
+      if (snapshot) {
+        const migrated = migrateSnapshot(snapshot);
+        this.restoreSnapshot(migrated);
+        if (snapshot.schemaVersion === MOBILE_LEGACY_STORAGE_SCHEMA_VERSION) {
+          try {
+            await this.storage.save(migrated);
+          } catch (error) {
+            this.lastError = errorMessage(error);
+          }
+        }
+      }
     } catch (error) {
-      this.currentSource = null;
-      this.currentBlob = null;
-      this.games = [];
+      this.sourceStates.clear();
+      this.currentSourceId = null;
       this.lastError = errorMessage(error);
     } finally {
       this.initialized = true;
@@ -394,21 +472,30 @@ export class PersistentMobileLibrary implements MobileLibrary {
   }
 
   private restoreSnapshot(snapshot: MobileLibrarySnapshot): void {
-    if (snapshot.sourceBytes.byteLength !== snapshot.source.size ||
-      snapshot.source.game_count !== snapshot.games.length ||
-      snapshot.source.warning_count !== snapshot.games.filter(({ record }) => record.warning !== null).length) {
-      throw new Error("Stored Mobile Library data is invalid.");
-    }
-    for (const entry of snapshot.games) {
-      const span = entry.scanned.offsetEnd - entry.scanned.offsetStart;
-      if (entry.scanned.offsetEnd > snapshot.source.size || span > MOBILE_MAX_GAME_BYTES) {
-        throw new Error("Stored Mobile Library data contains an unsafe Game record span.");
+    const sourceIds = new Set<number>();
+    const gameIds = new Set<number>();
+    const states = new Map<number, MobileSourceState>();
+    for (const persisted of snapshot.sources) {
+      validatePersistedSource(persisted);
+      if (sourceIds.has(persisted.source.id)) throw new Error("Stored Mobile Library data has duplicate source ids.");
+      sourceIds.add(persisted.source.id);
+      for (const entry of persisted.games) {
+        if (gameIds.has(entry.record.id)) throw new Error("Stored Mobile Library data has duplicate Game record ids.");
+        gameIds.add(entry.record.id);
       }
+      const bytes = persisted.sourceBytes.slice(0);
+      states.set(persisted.source.id, {
+        source: copySource(persisted.source),
+        blob: new Blob([bytes.slice(0)]),
+        bytes,
+        games: persisted.games.map(copyGameEntry),
+      });
     }
-
-    this.currentSource = copySource(snapshot.source);
-    this.currentBlob = new Blob([snapshot.sourceBytes.slice(0)]);
-    this.games = snapshot.games.map(copyGameEntry);
+    if (snapshot.activeSourceId !== null && !states.has(snapshot.activeSourceId)) {
+      throw new Error("Stored Mobile Library data has no active source.");
+    }
+    this.sourceStates = states;
+    this.currentSourceId = snapshot.activeSourceId;
   }
 
   private startReplacement(source: MobileSourceInput): Promise<void> {
@@ -433,6 +520,7 @@ export class PersistentMobileLibrary implements MobileLibrary {
 
     const pending: PendingMobileReplacement = {
       input: source,
+      sourceId: nextSourceId(this.sourceStates.values()),
       games: [],
       worker: null,
       phase: "scanning",
@@ -523,19 +611,21 @@ export class PersistentMobileLibrary implements MobileLibrary {
   private async commit(pending: PendingMobileReplacement): Promise<void> {
     try {
       const sourceBytes = await readBlobBytes(pending.input.blob);
-      const source = readySourceRecord(pending.input.name, sourceBytes.byteLength, pending.games);
-      const snapshot: MobileLibrarySnapshot = {
-        schemaVersion: 1,
+      const games = assignGameIds(pending.games, nextGameId(this.sourceStates.values()));
+      const source = readySourceRecord(pending.sourceId, pending.input.name, sourceBytes.byteLength, games);
+      const candidate = new Map(this.sourceStates);
+      candidate.set(pending.sourceId, {
         source,
-        sourceBytes,
-        games: pending.games.map(copyGameEntry),
-      };
+        blob: pending.input.blob,
+        bytes: sourceBytes,
+        games,
+      });
+      const snapshot = await snapshotForStates(candidate, pending.sourceId);
       await this.storage.save(snapshot);
 
       if (this.pending !== pending) return;
-      this.currentSource = source;
-      this.currentBlob = new Blob([sourceBytes.slice(0)]);
-      this.games = pending.games;
+      this.sourceStates = candidate;
+      this.currentSourceId = pending.sourceId;
       this.pending = null;
       this.lastError = null;
       this.emit();
@@ -550,12 +640,27 @@ export class PersistentMobileLibrary implements MobileLibrary {
     }
   }
 
-  private async clearStoredSource(): Promise<void> {
+  private async persistSelection(sourceId: number): Promise<void> {
     try {
-      await this.storage.clear();
-      this.currentSource = null;
-      this.currentBlob = null;
-      this.games = [];
+      await this.storage.save(await snapshotForStates(this.sourceStates, sourceId));
+      this.currentSourceId = sourceId;
+      this.lastError = null;
+      this.emit();
+    } catch (error) {
+      this.lastError = errorMessage(error);
+      this.emit();
+    }
+  }
+
+  private async removeStoredSource(sourceId: number): Promise<void> {
+    if (!this.sourceStates.has(sourceId)) return;
+    const candidate = new Map(this.sourceStates);
+    candidate.delete(sourceId);
+    const activeSourceId = this.currentSourceId === sourceId ? null : this.currentSourceId;
+    try {
+      await this.storage.save(await snapshotForStates(candidate, activeSourceId));
+      this.sourceStates = candidate;
+      this.currentSourceId = activeSourceId;
       this.lastError = null;
       this.emit();
     } catch (error) {
@@ -623,6 +728,117 @@ function listMobileGames(
   };
 }
 
+function activeGames(
+  states: Map<number, MobileSourceState>,
+  sourceId: number | null,
+): MobileGameEntry[] {
+  return sourceId === null ? [] : states.get(sourceId)?.games ?? [];
+}
+
+function sortedSources(states: Iterable<MobileSourceState>): MobileSourceRecord[] {
+  return sortedStates(states).map(({ source }) => copySource(source));
+}
+
+function sortedStates(states: Iterable<MobileSourceState>): MobileSourceState[] {
+  return [...states].sort((left, right) => compareSources(left.source, right.source));
+}
+
+function compareSources(left: MobileSourceRecord, right: MobileSourceRecord): number {
+  return left.name.localeCompare(right.name, undefined, { sensitivity: "base" }) || left.id - right.id;
+}
+
+function replacementStatus(pending: PendingMobileReplacement | null): MobileReplacementStatus | null {
+  if (!pending) return null;
+  return {
+    name: pending.input.name || "Untitled source",
+    size: pending.input.blob.size,
+    scan_status: pending.phase,
+    progress: { ...pending.progress },
+  };
+}
+
+function nextSourceId(states: Iterable<MobileSourceState>): number {
+  let maximum = 0;
+  for (const { source } of states) maximum = Math.max(maximum, source.id);
+  if (maximum === Number.MAX_SAFE_INTEGER) throw new Error("The Mobile Library has reached its source limit.");
+  return maximum + 1;
+}
+
+function nextGameId(states: Iterable<MobileSourceState>): number {
+  let maximum = 0;
+  for (const state of states) {
+    for (const { record } of state.games) maximum = Math.max(maximum, record.id);
+  }
+  if (maximum === Number.MAX_SAFE_INTEGER) throw new Error("The Mobile Library has reached its Game record limit.");
+  return maximum + 1;
+}
+
+function assignGameIds(entries: MobileGameEntry[], firstId: number): MobileGameEntry[] {
+  return entries.map((entry, index) => {
+    const id = firstId + index;
+    if (!Number.isSafeInteger(id)) throw new Error("The Mobile Library has reached its Game record limit.");
+    return {
+      scanned: {
+        ...entry.scanned,
+        headers: entry.scanned.headers.map(([name, value]) => [name, value] as [string, string]),
+      },
+      record: { ...entry.record, id },
+    };
+  });
+}
+
+async function snapshotForStates(
+  states: Map<number, MobileSourceState>,
+  activeSourceId: number | null,
+): Promise<MobileLibrarySnapshot> {
+  const sources = [];
+  for (const state of sortedStates(states.values())) {
+    const sourceBytes = state.bytes?.slice(0) ?? await readBlobBytes(state.blob);
+    sources.push({
+      source: copySource(state.source),
+      sourceBytes,
+      games: state.games.map(copyGameEntry),
+    });
+  }
+  return {
+    schemaVersion: 2,
+    activeSourceId,
+    sources,
+  };
+}
+
+function migrateSnapshot(snapshot: MobileStoredSnapshot): MobileLibrarySnapshot {
+  if (snapshot.schemaVersion !== MOBILE_LEGACY_STORAGE_SCHEMA_VERSION) return snapshot;
+  return {
+    schemaVersion: 2,
+    activeSourceId: 1,
+    sources: [{
+      source: { id: 1, ...snapshot.source },
+      sourceBytes: snapshot.sourceBytes.slice(0),
+      games: snapshot.games.map(copyGameEntry),
+    }],
+  };
+}
+
+function validatePersistedSource(
+  persisted: MobileLibrarySnapshot["sources"][number],
+): void {
+  const { source, sourceBytes, games } = persisted;
+  if (!Number.isSafeInteger(source.id) || source.id <= 0 ||
+    sourceBytes.byteLength !== source.size || source.size > MOBILE_MAX_SOURCE_BYTES ||
+    source.game_count !== games.length ||
+    source.warning_count !== games.filter(({ record }) => record.warning !== null).length) {
+    throw new Error("Stored Mobile Library data is invalid.");
+  }
+  for (const entry of games) {
+    const span = entry.scanned.offsetEnd - entry.scanned.offsetStart;
+    if (!validGameSpan(entry.scanned, source.size) || span > MOBILE_MAX_GAME_BYTES ||
+      entry.record.idx_in_file !== entry.scanned.idxInFile || entry.record.byte_size !== span) {
+      throw new Error("Stored Mobile Library data contains an unsafe Game record span.");
+    }
+  }
+}
+
 async function getMobileGameDocument(
   source: Blob | null,
   sourceRecord: MobileSourceRecord | null,
@@ -645,7 +861,7 @@ async function getMobileGameDocument(
   return {
     ...payload,
     gameId: entry.record.id,
-    fileId: 1,
+    fileId: sourceRecord.id,
     fileName: sourceRecord.name,
     idxInFile: entry.record.idx_in_file,
     neighbors: {
@@ -664,11 +880,13 @@ function validGameSpan(game: ScannedGame, sourceSize: number): boolean {
 }
 
 function readySourceRecord(
+  id: number,
   name: string,
   size: number,
   games: MobileGameEntry[],
 ): MobileSourceRecord {
   return {
+    id,
     name: name || "Untitled source",
     size,
     game_count: games.length,
@@ -706,9 +924,9 @@ function copyGameEntry(entry: MobileGameEntry): MobileGameEntry {
   };
 }
 
-function projectGameRecord(game: ScannedGame): MobileGameRecord {
+function projectGameRecord(game: ScannedGame, id = game.idxInFile + 1): MobileGameRecord {
   return {
-    id: game.idxInFile + 1,
+    id,
     idx_in_file: game.idxInFile,
     event: lastTagValue(game.headers, "Event"),
     site: lastTagValue(game.headers, "Site"),

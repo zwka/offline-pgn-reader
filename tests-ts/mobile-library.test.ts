@@ -10,8 +10,10 @@ import {
 } from "../src/mobile/library.js";
 import type { MobileScanMessage, MobileScanRequest } from "../src/mobile/scan-protocol.js";
 import type {
+  MobileLegacyLibrarySnapshot,
   MobileLibrarySnapshot,
   MobileLibraryStorage,
+  MobileStoredSnapshot,
 } from "../src/mobile/storage.js";
 
 class ManualWorker implements MobileScanWorker {
@@ -39,11 +41,11 @@ describe("in-memory Mobile Library", () => {
     const library = new InMemoryMobileLibrary(() => worker);
 
     library.replaceSource({ name: "study.pgn", blob: new Blob(["bytes"]) });
-    expect(library.source).toMatchObject({
+    expect(library.source).toBeNull();
+    expect(library.replacement).toMatchObject({
       name: "study.pgn",
       size: 5,
       scan_status: "scanning",
-      game_count: 0,
       progress: { bytesDone: 0, bytesTotal: 5, gamesFound: 0 },
     });
     worker.send({ type: "progress", bytesDone: 5, bytesTotal: 5, gamesFound: 1 });
@@ -92,7 +94,7 @@ describe("in-memory Mobile Library", () => {
     }]);
   });
 
-  it("replaces one active source and ignores stale worker messages", () => {
+  it("retains multiple sources and gives their Game records distinct ids", async () => {
     const workers: ManualWorker[] = [];
     const library = new InMemoryMobileLibrary(() => {
       const worker = new ManualWorker();
@@ -102,6 +104,7 @@ describe("in-memory Mobile Library", () => {
 
     library.replaceSource({ name: "first.pgn", blob: new Blob(["first"]) });
     workers[0].send(gameMessage("First"));
+    workers[0].send({ type: "complete" });
     library.replaceSource({ name: "second.pgn", blob: new Blob(["second"]) });
 
     expect(workers[0].terminated).toBe(true);
@@ -109,12 +112,22 @@ describe("in-memory Mobile Library", () => {
     workers[1].send(gameMessage("Second"));
     workers[1].send({ type: "complete" });
 
+    expect(library.sources.map((source) => source.name)).toEqual(["first.pgn", "second.pgn"]);
     expect(library.source).toMatchObject({
       name: "second.pgn",
       scan_status: "ready",
       game_count: 1,
     });
     expect(library.listGames().games.map((game) => game.event)).toEqual(["Second"]);
+    expect(library.listGames().games[0].id).toBe(2);
+    await library.selectSource(1);
+    expect(library.listGames().games.map((game) => game.event)).toEqual(["First"]);
+    expect(library.activeSourceId).toBe(1);
+    await library.removeSource(2);
+    expect(library.source?.name).toBe("first.pgn");
+    await library.removeSource(1);
+    expect(library.source).toBeNull();
+    expect(library.sources).toEqual([]);
   });
 
   it("caps pages and searches across the roster and metadata fields", () => {
@@ -197,12 +210,12 @@ describe("in-memory Mobile Library", () => {
 });
 
 class MemoryMobileStorage implements MobileLibraryStorage {
-  snapshot: MobileLibrarySnapshot | null = null;
+  snapshot: MobileStoredSnapshot | null = null;
   loadError: Error | null = null;
   saveError: Error | null = null;
   clearError: Error | null = null;
 
-  async load(): Promise<MobileLibrarySnapshot | null> {
+  async load(): Promise<MobileStoredSnapshot | null> {
     if (this.loadError) throw this.loadError;
     return this.snapshot;
   }
@@ -243,25 +256,30 @@ describe("persistent Mobile Library", () => {
     await replacement;
 
     expect(storage.snapshot).toMatchObject({
-      schemaVersion: 1,
-      source: {
-        name: "persisted.pgn",
-        size: new TextEncoder().encode(sourceText).byteLength,
-        game_count: 1,
-        warning_count: 1,
-        scan_status: "ready",
-      },
-      games: [{
-        scanned: {
-          offsetStart: 0,
-          offsetEnd: new TextEncoder().encode(sourceText).byteLength,
-          headers: [
-            ["Event", "Persisted"],
-            ["Event", "Duplicate"],
-            ["White", "Reader"],
-          ],
-          warning: "malformed record",
+      schemaVersion: 2,
+      activeSourceId: 1,
+      sources: [{
+        source: {
+          id: 1,
+          name: "persisted.pgn",
+          size: new TextEncoder().encode(sourceText).byteLength,
+          game_count: 1,
+          warning_count: 1,
+          scan_status: "ready",
         },
+        games: [{
+          scanned: {
+            offsetStart: 0,
+            offsetEnd: new TextEncoder().encode(sourceText).byteLength,
+            headers: [
+              ["Event", "Persisted"],
+              ["Event", "Duplicate"],
+              ["White", "Reader"],
+            ],
+            warning: "malformed record",
+          },
+          record: { id: 1 },
+        }],
       }],
     });
 
@@ -284,6 +302,120 @@ describe("persistent Mobile Library", () => {
     ]);
     expect(document.warnings).toEqual(["index warning: malformed record"]);
     expect(document.source).toBe(sourceText);
+  });
+
+  it("persists a source collection, active selection, and source-specific Game identity", async () => {
+    const storage = new MemoryMobileStorage();
+    const workers: ManualWorker[] = [];
+    const library = new PersistentMobileLibrary(() => {
+      const worker = new ManualWorker();
+      workers.push(worker);
+      return worker;
+    }, storage);
+    await library.ready();
+
+    await completeReplacement(library, workers, "zeta.pgn", '[Event "Zeta"]\n\n1. e4 *\n');
+    await completeReplacement(library, workers, "Alpha.pgn", '[Event "Alpha"]\n\n1. d4 *\n');
+
+    expect(library.sources.map((source) => source.name)).toEqual(["Alpha.pgn", "zeta.pgn"]);
+    const alphaId = library.sources.find((source) => source.name === "Alpha.pgn")!.id;
+    const zetaId = library.sources.find((source) => source.name === "zeta.pgn")!.id;
+    const alphaGameId = library.listGames().games[0].id;
+    expect(library.source?.id).toBe(alphaId);
+    expect(alphaGameId).not.toBe(1);
+
+    await library.selectSource(zetaId);
+    const zetaGame = library.listGames().games[0];
+    expect(library.source?.name).toBe("zeta.pgn");
+    expect(zetaGame.event).toBe("Zeta");
+    expect(zetaGame.id).not.toBe(alphaGameId);
+    expect((await library.getGameDocument(zetaGame.id)).source).toContain('[Event "Zeta"]');
+
+    await library.selectSource(alphaId);
+    await library.removeSource(zetaId);
+    expect(library.source?.name).toBe("Alpha.pgn");
+    expect(library.listGames().games[0].event).toBe("Alpha");
+
+    const restored = new PersistentMobileLibrary(() => {
+      const worker = new ManualWorker();
+      workers.push(worker);
+      return worker;
+    }, storage);
+    await restored.ready();
+    expect(restored.activeSourceId).toBe(alphaId);
+    expect(restored.sources.map((source) => source.name)).toEqual(["Alpha.pgn"]);
+    expect(restored.listGames().games[0].event).toBe("Alpha");
+
+    await completeReplacement(restored, workers, "second.pgn", '[Event "Second"]\n\n1. c4 *\n');
+    const secondId = restored.activeSourceId!;
+    await restored.removeSource(secondId);
+    expect(restored.activeSourceId).toBeNull();
+    expect(restored.source).toBeNull();
+    expect(restored.sources.map((source) => source.name)).toEqual(["Alpha.pgn"]);
+
+    const noSelectionAfterRelaunch = new PersistentMobileLibrary(() => {
+      throw new Error("restore should not start a Scan worker");
+    }, storage);
+    await noSelectionAfterRelaunch.ready();
+    expect(noSelectionAfterRelaunch.activeSourceId).toBeNull();
+    expect(noSelectionAfterRelaunch.sources.map((source) => source.name)).toEqual(["Alpha.pgn"]);
+  });
+
+  it("migrates the v1 one-source snapshot without losing bytes or Game records", async () => {
+    const sourceText = '[Event "Legacy"]\n[White "Reader"]\n\n1. e4 *\n';
+    const sourceBytes = new TextEncoder().encode(sourceText).buffer;
+    const storage = new MemoryMobileStorage();
+    const scanned = scannedGame(0, sourceText, [["Event", "Legacy"], ["White", "Reader"]]);
+    const legacy: MobileLegacyLibrarySnapshot = {
+      schemaVersion: 1,
+      source: {
+        name: "legacy.pgn",
+        size: sourceBytes.byteLength,
+        game_count: 1,
+        warning_count: 0,
+        scan_status: "ready",
+        scan_error: null,
+        progress: {
+          bytesDone: sourceBytes.byteLength,
+          bytesTotal: sourceBytes.byteLength,
+          gamesFound: 1,
+        },
+      },
+      sourceBytes,
+      games: [{
+        scanned,
+        record: {
+          id: 1,
+          idx_in_file: 0,
+          event: "Legacy",
+          site: "",
+          date: "",
+          round: "",
+          white: "Reader",
+          black: "",
+          result: "",
+          eco: "",
+          opening: "",
+          has_fen: 0,
+          warning: null,
+          byte_size: sourceBytes.byteLength,
+        },
+      }],
+    };
+    storage.snapshot = legacy;
+
+    const library = new PersistentMobileLibrary(() => {
+      throw new Error("migration should not start a Scan worker");
+    }, storage);
+    await library.ready();
+
+    expect(library.source).toMatchObject({ id: 1, name: "legacy.pgn", game_count: 1 });
+    expect(library.listGames().games[0].event).toBe("Legacy");
+    expect((await library.getGameDocument(1)).source).toBe(sourceText);
+    expect(storage.snapshot).toMatchObject({ schemaVersion: 2, activeSourceId: 1 });
+    const migrated = await storage.load();
+    if (!migrated || migrated.schemaVersion !== 2) throw new Error("migration did not save v2 data");
+    expect(migrated.sources[0].sourceBytes).toEqual(sourceBytes);
   });
 
   it("keeps the active source while a replacement is cancelled, invalid, unreadable, or over-limit", async () => {
@@ -373,7 +505,7 @@ describe("persistent Mobile Library", () => {
     expect(storage.snapshot).toBe(priorSnapshot);
     expect(library.error).toContain("quota exceeded");
 
-    storage.clearError = new Error("clear quota exceeded");
+    storage.saveError = new Error("clear quota exceeded");
     await library.clear();
     expect(library.source?.name).toBe("first.pgn");
     expect(library.listGames().games[0].event).toBe("First");
@@ -406,7 +538,8 @@ describe("persistent Mobile Library", () => {
       game_count: 1,
       scan_status: "ready",
     });
-    expect(storage.snapshot?.sourceBytes.byteLength).toBe(MOBILE_MAX_SOURCE_BYTES);
+    expect((storage.snapshot as MobileLibrarySnapshot).sources[0].sourceBytes.byteLength)
+      .toBe(MOBILE_MAX_SOURCE_BYTES);
   });
 
   it("accepts more than sixty Game records and can clear the persisted source", async () => {
@@ -498,7 +631,7 @@ function gameMessage(event: string, opening = ""): MobileScanMessage {
     game: {
       idxInFile: Number(event.match(/\d+$/)?.[0] ?? 0),
       offsetStart: 0,
-      offsetEnd: 10,
+      offsetEnd: 1,
       headers: [
         ["Event", event],
         ["White", `Player ${event.match(/\d+$/)?.[0] ?? 0}`],

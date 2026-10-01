@@ -55,19 +55,20 @@ terminal when you want to stop it.
 ### Try the mobile client
 
 The mobile client is the mobile PWA target: a separate static browser build
-that scans and persists exactly one active, selected `.pgn` source in a Web
-Worker and a versioned IndexedDB Mobile Library. It does not connect to the
-desktop server or use the desktop Library Index. A phone needs one initial
-online load over HTTPS, or installation while online, to receive the PWA shell
-and service-worker cache. After that setup, the persisted Mobile Library and
-Reader work offline.
+that scans and persists imported `.pgn` sources in a Web Worker and a versioned
+IndexedDB Mobile Library. One retained source is active at a time, and the
+source list can be switched without opening a Game automatically. It does not
+connect to the desktop server or use the desktop Library Index. A phone needs
+one initial online load over HTTPS, or installation while online, to receive
+the PWA shell and service-worker cache. After that setup, the persisted Mobile
+Library and Reader work offline.
 
 The mobile source limit is 50 MiB and the per-GameDocument safety limit is 8
 MiB. Game records have no artificial total-count limit; the list renders at
-most 50 records per page. Replacing an active source requires confirmation,
-scans the candidate separately, and promotes it only after its IndexedDB
-snapshot is saved. A cancelled, failed, oversized, or storage-failing
-replacement leaves the previous source active. The mobile Reader retains
+most 50 records per page. Imported sources are scanned separately and become
+active only after their IndexedDB Mobile Library snapshot is saved. A cancelled,
+failed, oversized, or storage-failing import leaves retained sources and the
+previous active selection unchanged. The mobile Reader retains
 custom FEN starts, Variations, comments, NAGs, graphics, ordered duplicate Tag
 pairs, warnings, the raw PGN source text, and adjacent-game navigation.
 
@@ -120,7 +121,7 @@ a versioned service-worker precache. Increment `CACHE_VERSION` in
 `build-mobile.mjs` for a release that should replace the cached application
 shell; the Mobile Library remains in IndexedDB across that update. For a
 permanent phone installation, publish the complete `mobile/` directory through
-any HTTPS host. The mobile one-source rule applies only to this PWA. The
+any HTTPS host. The Mobile Library persistence applies only to this PWA. The
 desktop `npm start` Library is the Node/Fastify/SQLite, filesystem-backed path
 and still supports multiple PGN sources.
 
@@ -313,8 +314,8 @@ npm start -- serve --port 8643
 ## Files and backup
 
 The following file and Index operations describe the desktop server path. The
-mobile PWA stores its active source in browser IndexedDB and uses **Clear
-source** to remove it.
+mobile PWA stores retained sources in browser IndexedDB and uses **Remove
+source** to remove the active source.
 
 `data/index.sqlite3` is a local Index derived from your PGN sources. It can be
 rebuilt at any time. Back up the PGN sources themselves; the Index is not the

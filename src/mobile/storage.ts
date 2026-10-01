@@ -1,7 +1,8 @@
 import type { ScannedGame } from "../scan.js";
 import type { MobileGameRecord, MobileSourceRecord } from "./library.js";
 
-export const MOBILE_STORAGE_SCHEMA_VERSION = 1;
+export const MOBILE_LEGACY_STORAGE_SCHEMA_VERSION = 1;
+export const MOBILE_STORAGE_SCHEMA_VERSION = 2;
 
 const DEFAULT_DATABASE_NAME = "offline-pgn-reader-mobile";
 const STORE_NAME = "library";
@@ -12,15 +13,31 @@ export type MobilePersistedGame = {
   record: MobileGameRecord;
 };
 
-export type MobileLibrarySnapshot = {
-  schemaVersion: typeof MOBILE_STORAGE_SCHEMA_VERSION;
+export type MobilePersistedSource = {
   source: MobileSourceRecord;
   sourceBytes: ArrayBuffer;
   games: MobilePersistedGame[];
 };
 
+export type MobileLibrarySnapshot = {
+  schemaVersion: typeof MOBILE_STORAGE_SCHEMA_VERSION;
+  activeSourceId: number | null;
+  sources: MobilePersistedSource[];
+};
+
+export type MobileLegacySourceRecord = Omit<MobileSourceRecord, "id">;
+
+export type MobileLegacyLibrarySnapshot = {
+  schemaVersion: typeof MOBILE_LEGACY_STORAGE_SCHEMA_VERSION;
+  source: MobileLegacySourceRecord;
+  sourceBytes: ArrayBuffer;
+  games: MobilePersistedGame[];
+};
+
+export type MobileStoredSnapshot = MobileLibrarySnapshot | MobileLegacyLibrarySnapshot;
+
 export interface MobileLibraryStorage {
-  load(): Promise<MobileLibrarySnapshot | null>;
+  load(): Promise<MobileStoredSnapshot | null>;
   save(snapshot: MobileLibrarySnapshot): Promise<void>;
   clear(): Promise<void>;
 }
@@ -48,9 +65,9 @@ export class IndexedDbMobileStorage implements MobileLibraryStorage {
       (typeof indexedDB === "undefined" ? undefined : indexedDB);
   }
 
-  async load(): Promise<MobileLibrarySnapshot | null> {
+  async load(): Promise<MobileStoredSnapshot | null> {
     const database = await this.openDatabase();
-    return new Promise<MobileLibrarySnapshot | null>((resolve, reject) => {
+    return new Promise<MobileStoredSnapshot | null>((resolve, reject) => {
       let settled = false;
       let value: unknown;
       let transaction: IDBTransaction;
@@ -203,7 +220,7 @@ export class IndexedDbMobileStorage implements MobileLibraryStorage {
   }
 }
 
-function parseSnapshot(value: unknown): MobileLibrarySnapshot {
+function parseSnapshot(value: unknown): MobileStoredSnapshot {
   if (!isSnapshot(value)) {
     throw new MobileStorageError("Mobile Library storage has an unsupported schema.");
   }
@@ -211,21 +228,42 @@ function parseSnapshot(value: unknown): MobileLibrarySnapshot {
 }
 
 function assertSnapshot(snapshot: MobileLibrarySnapshot): void {
-  if (!isSnapshot(snapshot)) {
+  if (!isCurrentSnapshot(snapshot)) {
     throw new MobileStorageError("Mobile Library snapshot has an unsupported schema.");
   }
 }
 
-function isSnapshot(value: unknown): value is MobileLibrarySnapshot {
-  if (!isRecord(value) || value.schemaVersion !== MOBILE_STORAGE_SCHEMA_VERSION) return false;
-  if (!isArrayBuffer(value.sourceBytes) || !isSource(value.source)) return false;
+function isSnapshot(value: unknown): value is MobileStoredSnapshot {
+  if (!isRecord(value)) return false;
+  if (value.schemaVersion === MOBILE_STORAGE_SCHEMA_VERSION) return isCurrentSnapshot(value);
+  if (value.schemaVersion === MOBILE_LEGACY_STORAGE_SCHEMA_VERSION) return isLegacySnapshot(value);
+  return false;
+}
+
+function isCurrentSnapshot(value: Record<string, unknown>): value is MobileLibrarySnapshot {
+  if (!isSafePositiveIntegerOrNull(value.activeSourceId) || !Array.isArray(value.sources)) return false;
+  if (!value.sources.every(isPersistedSource)) return false;
+  const sources = value.sources;
+  const sourceIds = sources.map((source) => source.source.id);
+  if (new Set(sourceIds).size !== sourceIds.length) return false;
+  return value.activeSourceId === null || sourceIds.includes(value.activeSourceId);
+}
+
+function isLegacySnapshot(value: Record<string, unknown>): value is MobileLegacyLibrarySnapshot {
+  if (!isArrayBuffer(value.sourceBytes) || !isLegacySource(value.source)) return false;
   if (value.sourceBytes.byteLength !== value.source.size || !Array.isArray(value.games)) return false;
-  return value.games.every(isPersistedGame);
+  return value.games.every((game) => isPersistedGame(game, true));
+}
+
+function isPersistedSource(value: unknown): value is MobilePersistedSource {
+  if (!isRecord(value) || !isArrayBuffer(value.sourceBytes) || !isSource(value.source)) return false;
+  if (value.sourceBytes.byteLength !== value.source.size || !Array.isArray(value.games)) return false;
+  return value.games.every((game) => isPersistedGame(game));
 }
 
 function isSource(value: unknown): value is MobileSourceRecord {
   if (!isRecord(value)) return false;
-  if (typeof value.name !== "string" || !isSafeNonNegativeInteger(value.size)) return false;
+  if (!isSafePositiveInteger(value.id) || typeof value.name !== "string" || !isSafeNonNegativeInteger(value.size)) return false;
   if (!isSafeNonNegativeInteger(value.game_count) || !isSafeNonNegativeInteger(value.warning_count)) return false;
   if (value.scan_status !== "ready" || value.scan_error !== null) return false;
   if (!isRecord(value.progress)) return false;
@@ -234,9 +272,19 @@ function isSource(value: unknown): value is MobileSourceRecord {
     isSafeNonNegativeInteger(value.progress.gamesFound);
 }
 
-function isPersistedGame(value: unknown): value is MobilePersistedGame {
+function isLegacySource(value: unknown): value is MobileLegacySourceRecord {
+  if (!isRecord(value) || typeof value.name !== "string" || !isSafeNonNegativeInteger(value.size)) return false;
+  if (!isSafeNonNegativeInteger(value.game_count) || !isSafeNonNegativeInteger(value.warning_count)) return false;
+  if (value.scan_status !== "ready" || value.scan_error !== null) return false;
+  if (!isRecord(value.progress)) return false;
+  return isSafeNonNegativeInteger(value.progress.bytesDone) &&
+    isSafeNonNegativeInteger(value.progress.bytesTotal) &&
+    isSafeNonNegativeInteger(value.progress.gamesFound);
+}
+
+function isPersistedGame(value: unknown, legacy = false): value is MobilePersistedGame {
   if (!isRecord(value) || !isScannedGame(value.scanned) || !isGameRecord(value.record)) return false;
-  return value.record.id === value.scanned.idxInFile + 1 &&
+  return (!legacy || value.record.id === value.scanned.idxInFile + 1) &&
     value.record.idx_in_file === value.scanned.idxInFile &&
     value.record.byte_size === value.scanned.offsetEnd - value.scanned.offsetStart;
 }
@@ -281,6 +329,14 @@ function isArrayBuffer(value: unknown): value is ArrayBuffer {
 
 function isSafeNonNegativeInteger(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+}
+
+function isSafePositiveInteger(value: unknown): value is number {
+  return isSafeNonNegativeInteger(value) && value > 0;
+}
+
+function isSafePositiveIntegerOrNull(value: unknown): value is number | null {
+  return value === null || isSafePositiveInteger(value);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

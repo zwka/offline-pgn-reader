@@ -40,7 +40,7 @@ test("publishes install metadata and precaches the complete mobile build", async
   const workerResponse = await page.request.get("/service-worker.js");
   expect(workerResponse.ok()).toBe(true);
   const workerSource = await workerResponse.text();
-  expect(workerSource).toContain('const CACHE_NAME = "offline-pgn-reader-mobile-v2"');
+  expect(workerSource).toContain('const CACHE_NAME = "offline-pgn-reader-mobile-v3"');
   expect(workerSource).toContain("self.skipWaiting()");
   expect(workerSource).toContain("self.clients.claim()");
   expect(workerSource).toContain("caches.delete(key)");
@@ -61,7 +61,7 @@ test("publishes install metadata and precaches the complete mobile build", async
       paths: requests.map((request) => new URL(request.url).pathname),
     };
   });
-  expect(cacheState.name).toBe("offline-pgn-reader-mobile-v2");
+  expect(cacheState.name).toBe("offline-pgn-reader-mobile-v3");
   expect(cacheState.paths).toEqual(expect.arrayContaining(requiredCachedAssets));
 });
 
@@ -119,6 +119,167 @@ test("restores the persisted reader with network disabled", async ({ page }) => 
     await page.locator('[data-action="next-game"]').click();
     await expect(page.locator(".reader-title")).toContainText("Tree - Builder");
     expect(await page.locator(".variation").count()).toBeGreaterThan(0);
+  } finally {
+    await page.unroute("**/*");
+    await page.context().setOffline(false);
+  }
+
+  expect(blockedRequests).toEqual([]);
+  expect(pageErrors).toEqual([]);
+});
+
+test("migrates a v1 one-source IndexedDB record without losing its Game record", async ({ page }) => {
+  const sourceText = '[Event "Browser legacy"]\n[White "Migrated"]\n\n1. e4 *\n';
+  await page.goto("/");
+  await expect(page.locator("#source-status")).toHaveText("idle", { timeout: 10_000 });
+  await page.evaluate(async (sourceText) => {
+    const databaseName = "offline-pgn-reader-mobile";
+    await new Promise<void>((resolve, reject) => {
+      const request = indexedDB.deleteDatabase(databaseName);
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(request.error);
+      request.onblocked = () => reject(new Error("could not reset Mobile Library database"));
+    });
+
+    await new Promise<void>((resolve, reject) => {
+      const request = indexedDB.open(databaseName, 1);
+      request.onupgradeneeded = () => request.result.createObjectStore("library");
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => {
+        const sourceBytes = new TextEncoder().encode(sourceText).buffer;
+        const transaction = request.result.transaction("library", "readwrite");
+        transaction.objectStore("library").put({
+          schemaVersion: 1,
+          source: {
+            name: "browser-legacy.pgn",
+            size: sourceBytes.byteLength,
+            game_count: 1,
+            warning_count: 0,
+            scan_status: "ready",
+            scan_error: null,
+            progress: {
+              bytesDone: sourceBytes.byteLength,
+              bytesTotal: sourceBytes.byteLength,
+              gamesFound: 1,
+            },
+          },
+          sourceBytes,
+          games: [{
+            scanned: {
+              idxInFile: 0,
+              offsetStart: 0,
+              offsetEnd: sourceBytes.byteLength,
+              headers: [["Event", "Browser legacy"], ["White", "Migrated"]],
+              warning: null,
+            },
+            record: {
+              id: 1,
+              idx_in_file: 0,
+              event: "Browser legacy",
+              site: "",
+              date: "",
+              round: "",
+              white: "Migrated",
+              black: "",
+              result: "",
+              eco: "",
+              opening: "",
+              has_fen: 0,
+              warning: null,
+              byte_size: sourceBytes.byteLength,
+            },
+          }],
+        }, "active");
+        transaction.oncomplete = () => {
+          request.result.close();
+          resolve();
+        };
+        transaction.onerror = () => reject(transaction.error);
+      };
+    });
+  }, sourceText);
+
+  await page.reload();
+  await expect(page.locator("#source-status")).toHaveText("ready", { timeout: 10_000 });
+  await expect(page.locator("#source-name")).toHaveText("browser-legacy.pgn");
+  await expect(page.locator("#record-list .game-record")).toHaveCount(1);
+  await page.locator("#record-list .game-record").click();
+  await expect(page.locator(".reader-title")).toContainText("Migrated");
+
+  const migrated = await page.evaluate(async () => {
+    const request = indexedDB.open("offline-pgn-reader-mobile");
+    const database = await new Promise<IDBDatabase>((resolve, reject) => {
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    const snapshot = await new Promise<any>((resolve, reject) => {
+      const transaction = database.transaction("library", "readonly");
+      const read = transaction.objectStore("library").get("active");
+      read.onsuccess = () => resolve(read.result);
+      read.onerror = () => reject(read.error);
+    });
+    database.close();
+    return {
+      schemaVersion: snapshot.schemaVersion,
+      activeSourceId: snapshot.activeSourceId,
+      sourceCount: snapshot.sources.length,
+      sourceBytes: snapshot.sources[0].sourceBytes.byteLength,
+    };
+  });
+  expect(migrated).toEqual({
+    schemaVersion: 2,
+    activeSourceId: 1,
+    sourceCount: 1,
+    sourceBytes: new TextEncoder().encode(sourceText).byteLength,
+  });
+});
+
+test("retains each source and reads the selected source offline", async ({ page }) => {
+  const pageErrors: string[] = [];
+  const blockedRequests: string[] = [];
+  page.on("pageerror", (error) => pageErrors.push(error.message));
+
+  await page.goto("/");
+  await waitForControlledServiceWorker(page);
+  await page.locator("#source-input").setInputFiles({
+    name: "offline-first.pgn",
+    mimeType: "application/x-chess-pgn",
+    buffer: Buffer.from('[Event "Offline First"]\n[White "First"]\n\n1. e4 *\n'),
+  });
+  await expect(page.locator("#source-status")).toHaveText("ready", { timeout: 10_000 });
+  await page.locator("#source-input").setInputFiles({
+    name: "offline-second.pgn",
+    mimeType: "application/x-chess-pgn",
+    buffer: Buffer.from('[Event "Offline Second"]\n[White "Second"]\n\n1. d4 *\n'),
+  });
+  await expect(page.locator("#source-name")).toHaveText("offline-second.pgn", { timeout: 10_000 });
+  await page.getByRole("button", { name: "Select offline-first.pgn" }).click();
+  await expect(page.locator("#source-name")).toHaveText("offline-first.pgn");
+  await expect(page.locator("#reader-panel")).toBeHidden();
+
+  const webkit = isWebKit(page);
+  if (!webkit) await page.context().setOffline(true);
+  await page.route("**/*", (route) => {
+    blockedRequests.push(route.request().url());
+    return route.abort();
+  });
+  try {
+    await verifyOfflineStartup(page);
+    await expect(page.locator("#source-name")).toHaveText("offline-first.pgn", { timeout: 10_000 });
+    await expect(page.locator("#record-list")).toContainText("Offline First");
+    await page.locator("#record-list .game-record").click();
+    await expect(page.locator(".reader-title")).toContainText("First");
+    await page.getByRole("button", { name: "Raw PGN source" }).click();
+    await expect(page.locator(".raw-source")).toContainText('[Event "Offline First"]');
+    await page.getByRole("button", { name: "Back to Game records" }).click();
+
+    await page.getByRole("button", { name: "Select offline-second.pgn" }).click();
+    await expect(page.locator("#source-name")).toHaveText("offline-second.pgn");
+    await expect(page.locator("#record-list")).toContainText("Offline Second");
+    await page.locator("#record-list .game-record").click();
+    await expect(page.locator(".reader-title")).toContainText("Second");
+    await page.getByRole("button", { name: "Raw PGN source" }).click();
+    await expect(page.locator(".raw-source")).toContainText('[Event "Offline Second"]');
   } finally {
     await page.unroute("**/*");
     await page.context().setOffline(false);

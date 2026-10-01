@@ -152,36 +152,49 @@ test("keeps the main thread usable and bounds the searchable Game record list", 
   await expect(page.locator("#record-list")).toContainText("Opening 100");
 });
 
-test("replaces the active Mobile Library source", async ({ page }) => {
+test("retains, orders, switches, removes, and restores Mobile Library sources", async ({ page }) => {
   await page.goto("/");
   await page.locator("#source-input").setInputFiles({
-    name: "first.pgn",
+    name: "zeta.pgn",
     mimeType: "application/x-chess-pgn",
-    buffer: Buffer.from('[Event "First"]\n[White "One"]\n\n1. e4 *\n'),
+    buffer: Buffer.from('[Event "Zeta"]\n[White "One"]\n\n1. e4 *\n'),
   });
   await expect(page.locator("#source-status")).toHaveText("ready", { timeout: 10_000 });
 
-  const replacementDialog = page.waitForEvent("dialog").then(async (dialog) => {
-    expect(dialog.type()).toBe("confirm");
-    expect(dialog.message()).toContain("first.pgn");
-    await dialog.accept();
-  });
   await page.locator("#source-input").setInputFiles({
-    name: "replacement.pgn",
+    name: "Alpha.pgn",
     mimeType: "application/x-chess-pgn",
-    buffer: Buffer.from('[Event "Replacement"]\n[White "Two"]\n\n1. d4 *\n'),
+    buffer: Buffer.from('[Event "Alpha"]\n[White "Two"]\n\n1. d4 *\n'),
   });
-  await replacementDialog;
 
   await expect(page.locator("#source-status")).toHaveText("ready", { timeout: 10_000 });
-  await expect(page.locator("#source-name")).toHaveText("replacement.pgn");
+  await expect(page.locator("#source-name")).toHaveText("Alpha.pgn");
   await expect(page.locator("#record-list .game-record")).toHaveCount(1);
-  await expect(page.locator("#record-list")).toContainText("Replacement");
-  await expect(page.locator("#record-list")).not.toContainText("First");
-  await expect(page.locator(".source-panel")).toHaveCount(1);
+  await expect(page.locator("#record-list")).toContainText("Alpha");
+  await expect(page.locator("#source-list .source-select-name")).toHaveText(["Alpha.pgn", "zeta.pgn"]);
+  await expect(page.getByRole("button", { name: "Select Alpha.pgn" })).toHaveAttribute("aria-current", "true");
+  await expect(page.getByRole("button", { name: "Select zeta.pgn" })).not.toHaveAttribute("aria-current");
+
+  await page.getByRole("button", { name: "Select zeta.pgn" }).click();
+  await expect(page.locator("#source-name")).toHaveText("zeta.pgn");
+  await expect(page.locator("#record-list")).toContainText("Zeta");
+  await expect(page.locator("#reader-panel")).toBeHidden();
+
+  await page.reload();
+  await expect(page.locator("#source-name")).toHaveText("zeta.pgn", { timeout: 10_000 });
+  await expect(page.locator("#source-list .source-select-name")).toHaveText(["Alpha.pgn", "zeta.pgn"]);
+  await expect(page.locator("#record-list")).toContainText("Zeta");
+
+  await page.getByRole("button", { name: "Remove Alpha.pgn" }).click();
+  await expect(page.locator("#source-name")).toHaveText("zeta.pgn");
+  await expect(page.locator("#source-list .source-select-name")).toHaveText(["zeta.pgn"]);
+  await page.getByRole("button", { name: "Remove zeta.pgn" }).click();
+  await expect(page.locator("#source-status")).toHaveText("idle");
+  await expect(page.locator("#source-name")).toHaveText("No PGN source selected");
+  await expect(page.locator("#record-list .game-record")).toHaveCount(0);
 });
 
-test("keeps the active source after a failed replacement and recovers on retry", async ({ page }) => {
+test("keeps retained sources after a failed import and recovers on retry", async ({ page }) => {
   await page.goto("/");
   await page.locator("#source-input").setInputFiles({
     name: "active-source.pgn",
@@ -190,31 +203,28 @@ test("keeps the active source after a failed replacement and recovers on retry",
   });
   await expect(page.locator("#source-status")).toHaveText("ready", { timeout: 10_000 });
 
-  const invalidReplacementDialog = page.waitForEvent("dialog").then((dialog) => dialog.accept());
   await page.locator("#source-input").setInputFiles({
     name: "not-a-pgn.txt",
     mimeType: "text/plain",
     buffer: Buffer.from("replacement failed"),
   });
-  await invalidReplacementDialog;
   await expect(page.locator("#source-error")).toContainText("ends in .pgn");
   await expect(page.locator("#source-name")).toHaveText("active-source.pgn");
   await expect(page.locator("#record-list .game-record")).toHaveCount(1);
   await expect(page.locator("#record-list")).toContainText("Kept");
 
-  const recoveredReplacementDialog = page.waitForEvent("dialog").then((dialog) => dialog.accept());
   await page.locator("#source-input").setInputFiles({
     name: "recovered-source.pgn",
     mimeType: "application/x-chess-pgn",
     buffer: Buffer.from('[Event "Recovered"]\n[White "New source"]\n\n1. d4 *\n'),
   });
-  await recoveredReplacementDialog;
   await expect(page.locator("#source-status")).toHaveText("ready", { timeout: 10_000 });
   await expect(page.locator("#source-name")).toHaveText("recovered-source.pgn");
   await expect(page.locator("#source-error")).toBeHidden();
   await expect(page.locator("#record-list .game-record")).toHaveCount(1);
   await expect(page.locator("#record-list")).toContainText("New source");
   await expect(page.locator("#record-list")).not.toContainText("Kept");
+  await expect(page.locator("#source-list .source-select-name")).toHaveText(["active-source.pgn", "recovered-source.pgn"]);
 });
 
 test("accepts the 50 MiB source boundary and rejects oversized Game records", async ({ page }, testInfo) => {
@@ -240,17 +250,13 @@ test("accepts the 50 MiB source boundary and rejects oversized Game records", as
     }))).toEqual({ value: MOBILE_MAX_SOURCE_BYTES, max: MOBILE_MAX_SOURCE_BYTES });
     await expect(page.locator("#scan-progress-label")).toHaveText("Scan complete.");
 
-    const oversizedSourceDialog = page.waitForEvent("dialog").then((dialog) => dialog.accept());
     await page.locator("#source-input").setInputFiles(oversizedPath);
-    await oversizedSourceDialog;
     await expect(page.locator("#source-error")).toContainText("50 MiB");
     await expect(page.locator("#source-status")).toHaveText("ready");
     await expect(page.locator("#source-name")).toHaveText("source-boundary.pgn");
     await expect(page.locator("#record-list .game-record")).toHaveCount(1);
 
-    const oversizedGameDialog = page.waitForEvent("dialog").then((dialog) => dialog.accept());
     await page.locator("#source-input").setInputFiles(largeGamePath);
-    await oversizedGameDialog;
     await expect(page.locator("#source-error")).toContainText("8 MiB", { timeout: 30_000 });
     await expect(page.locator("#source-status")).toHaveText("ready");
     await expect(page.locator("#source-name")).toHaveText("source-boundary.pgn");
