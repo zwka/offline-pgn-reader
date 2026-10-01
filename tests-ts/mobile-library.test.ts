@@ -13,6 +13,7 @@ import type {
   MobileLegacyLibrarySnapshot,
   MobileLibrarySnapshot,
   MobileLibraryStorage,
+  MobileMultiSourceLibrarySnapshot,
   MobileStoredSnapshot,
 } from "../src/mobile/storage.js";
 
@@ -207,6 +208,43 @@ describe("in-memory Mobile Library", () => {
     expect(document.neighbors).toEqual({ prev: 1, next: null });
     expect(document.source).toBe(sourceText.slice(secondStart));
   });
+
+  it("starts without Resume bookmarks and remembers the latest Game record per source", async () => {
+    const workers: ManualWorker[] = [];
+    const library = new InMemoryMobileLibrary(() => {
+      const worker = new ManualWorker();
+      workers.push(worker);
+      return worker;
+    });
+
+    const first = library.replaceSource({ name: "first.pgn", blob: new Blob(["first"]) });
+    workers[0].send(gameMessage("First 0"));
+    workers[0].send(gameMessage("First 1"));
+    workers[0].send({ type: "complete" });
+    await first;
+    const firstGames = library.listGames().games;
+    expect(library.source?.resumeBookmark).toBeNull();
+
+    const second = library.replaceSource({ name: "second.pgn", blob: new Blob(["second"]) });
+    workers[1].send(gameMessage("Second"));
+    workers[1].send({ type: "complete" });
+    await second;
+    const secondGame = library.listGames().games[0];
+    expect(library.source?.resumeBookmark).toBeNull();
+
+    await library.rememberGame(2, secondGame.id);
+    await library.rememberGame(2, secondGame.id + 1);
+    expect(library.source?.resumeBookmark).toEqual({ sourceId: 2, gameId: secondGame.id });
+
+    await library.selectSource(1);
+    await library.rememberGame(1, firstGames[0].id);
+    expect(library.source?.resumeBookmark).toEqual({ sourceId: 1, gameId: firstGames[0].id });
+    await library.rememberGame(1, firstGames[1].id);
+    expect(library.source?.resumeBookmark).toEqual({ sourceId: 1, gameId: firstGames[1].id });
+
+    await library.selectSource(2);
+    expect(library.source?.resumeBookmark).toEqual({ sourceId: 2, gameId: secondGame.id });
+  });
 });
 
 class MemoryMobileStorage implements MobileLibraryStorage {
@@ -256,7 +294,7 @@ describe("persistent Mobile Library", () => {
     await replacement;
 
     expect(storage.snapshot).toMatchObject({
-      schemaVersion: 2,
+      schemaVersion: 3,
       activeSourceId: 1,
       sources: [{
         source: {
@@ -412,10 +450,91 @@ describe("persistent Mobile Library", () => {
     expect(library.source).toMatchObject({ id: 1, name: "legacy.pgn", game_count: 1 });
     expect(library.listGames().games[0].event).toBe("Legacy");
     expect((await library.getGameDocument(1)).source).toBe(sourceText);
-    expect(storage.snapshot).toMatchObject({ schemaVersion: 2, activeSourceId: 1 });
+    expect(storage.snapshot).toMatchObject({ schemaVersion: 3, activeSourceId: 1 });
     const migrated = await storage.load();
-    if (!migrated || migrated.schemaVersion !== 2) throw new Error("migration did not save v2 data");
+    if (!migrated || migrated.schemaVersion !== 3) throw new Error("migration did not save v3 data");
     expect(migrated.sources[0].sourceBytes).toEqual(sourceBytes);
+    expect(migrated.sources[0].source.resumeBookmark).toBeNull();
+  });
+
+  it("migrates the v2 source collection without inventing Resume bookmarks", async () => {
+    const storage = new MemoryMobileStorage();
+    const workers: ManualWorker[] = [];
+    const library = new PersistentMobileLibrary(() => {
+      const worker = new ManualWorker();
+      workers.push(worker);
+      return worker;
+    }, storage);
+    await library.ready();
+
+    await completeReplacement(library, workers, "first.pgn", '[Event "First"]\n\n1. e4 *\n');
+    await completeReplacement(library, workers, "second.pgn", '[Event "Second"]\n\n1. d4 *\n');
+    const firstId = library.sources.find((source) => source.name === "first.pgn")!.id;
+    await library.selectSource(firstId);
+    await library.rememberGame(firstId, library.listGames().games[0].id);
+    await library.selectSource(2);
+
+    const current = storage.snapshot;
+    if (!current || current.schemaVersion !== 3) throw new Error("expected a v3 snapshot");
+    storage.snapshot = {
+      schemaVersion: 2,
+      activeSourceId: current.activeSourceId,
+      sources: current.sources.map(({ source, sourceBytes, games }) => {
+        const { resumeBookmark: _resumeBookmark, ...sourceWithoutBookmark } = source;
+        return { source: sourceWithoutBookmark, sourceBytes, games };
+      }),
+    } satisfies MobileMultiSourceLibrarySnapshot;
+
+    const restored = new PersistentMobileLibrary(() => {
+      throw new Error("migration should not start a Scan worker");
+    }, storage);
+    await restored.ready();
+
+    expect(restored.sources.map((source) => source.name)).toEqual(["first.pgn", "second.pgn"]);
+    expect(restored.sources.every((source) => source.resumeBookmark === null)).toBe(true);
+    expect(restored.activeSourceId).toBe(2);
+    expect(storage.snapshot).toMatchObject({ schemaVersion: 3 });
+  });
+
+  it("persists per-source Resume bookmarks, restores them, and removes them with the source", async () => {
+    const storage = new MemoryMobileStorage();
+    const workers: ManualWorker[] = [];
+    const library = new PersistentMobileLibrary(() => {
+      const worker = new ManualWorker();
+      workers.push(worker);
+      return worker;
+    }, storage);
+    await library.ready();
+
+    await completeReplacement(library, workers, "first.pgn", '[Event "First"]\n\n1. e4 *\n');
+    const firstId = library.activeSourceId!;
+    const firstGameId = library.listGames().games[0].id;
+    await completeReplacement(library, workers, "second.pgn", '[Event "Second"]\n\n1. d4 *\n');
+    const secondId = library.activeSourceId!;
+    const secondGameId = library.listGames().games[0].id;
+
+    await library.rememberGame(firstId, firstGameId);
+    await library.rememberGame(secondId, secondGameId);
+    await library.selectSource(firstId);
+
+    const restored = new PersistentMobileLibrary(() => {
+      throw new Error("restore should not start a Scan worker");
+    }, storage);
+    await restored.ready();
+    expect(restored.activeSourceId).toBe(firstId);
+    expect(restored.sources.find((source) => source.id === firstId)?.resumeBookmark)
+      .toEqual({ sourceId: firstId, gameId: firstGameId });
+    expect(restored.sources.find((source) => source.id === secondId)?.resumeBookmark)
+      .toEqual({ sourceId: secondId, gameId: secondGameId });
+
+    await restored.removeSource(firstId);
+    expect(restored.sources.find((source) => source.id === firstId)).toBeUndefined();
+    const afterRemoval = new PersistentMobileLibrary(() => {
+      throw new Error("restore should not start a Scan worker");
+    }, storage);
+    await afterRemoval.ready();
+    expect(afterRemoval.sources.map((source) => source.id)).toEqual([secondId]);
+    expect(afterRemoval.sources[0].resumeBookmark).toEqual({ sourceId: secondId, gameId: secondGameId });
   });
 
   it("keeps the active source while a replacement is cancelled, invalid, unreadable, or over-limit", async () => {

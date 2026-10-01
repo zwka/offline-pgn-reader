@@ -113,6 +113,73 @@ test("restores the persisted Mobile Library after reload and clears it", async (
   await expect(page.locator("#record-list .game-record")).toHaveCount(0);
 });
 
+test("creates per-source Resume bookmarks, continues from the root, and removes them with a source", async ({ page }) => {
+  const firstSource = twoGames;
+  const secondSource = Buffer.from('[Event "Resume second"]\n[White "Second"]\n[Black "Reader"]\n\n1. c4 *\n');
+
+  await page.goto("/");
+  await page.locator("#source-input").setInputFiles({
+    name: "resume-first.pgn",
+    mimeType: "application/x-chess-pgn",
+    buffer: firstSource,
+  });
+  await expect(page.locator("#source-status")).toHaveText("ready", { timeout: 10_000 });
+  await expect(page.locator("#record-list .game-record")).toHaveCount(2);
+  await expect(page.locator("#source-list .source-continue")).toHaveCount(0);
+
+  await page.locator("#record-list .game-record").first().click();
+  await expect(page.locator(".reader-title")).toContainText("White One");
+  await expect(page.locator(".notation-body .mv.current")).toHaveCount(0);
+  await page.locator('[data-action="next-game"]').click();
+  await expect(page.locator(".reader-title")).toContainText("White Two");
+  await page.locator('[data-action="previous-game"]').click();
+  await expect(page.locator(".reader-title")).toContainText("White One");
+  await page.locator('[data-action="next-game"]').click();
+  await expect(page.locator(".reader-title")).toContainText("White Two");
+  await page.locator('[data-action="forward"]').click();
+  await expect(page.locator(".notation-body .mv.current")).toContainText("d4");
+  await page.getByRole("button", { name: "Back to Game records" }).click();
+
+  const firstItem = page.locator("#source-list .source-item").filter({ hasText: "resume-first.pgn" });
+  await expect(firstItem.getByRole("button", { name: "Continue" })).toBeVisible();
+
+  await page.locator("#source-input").setInputFiles({
+    name: "resume-second.pgn",
+    mimeType: "application/x-chess-pgn",
+    buffer: secondSource,
+  });
+  await expect(page.locator("#source-name")).toHaveText("resume-second.pgn", { timeout: 10_000 });
+  const secondItem = page.locator("#source-list .source-item").filter({ hasText: "resume-second.pgn" });
+  await expect(secondItem.locator(".source-continue")).toHaveCount(0);
+  await page.locator("#record-list .game-record").click();
+  await expect(page.locator(".reader-title")).toContainText("Second");
+  await page.getByRole("button", { name: "Back to Game records" }).click();
+  await expect(secondItem.getByRole("button", { name: "Continue" })).toBeVisible();
+
+  await page.getByRole("button", { name: "Select resume-first.pgn" }).click();
+  await expect(page.locator("#source-name")).toHaveText("resume-first.pgn");
+  await page.reload();
+  await expect(page.locator("#source-name")).toHaveText("resume-first.pgn", { timeout: 10_000 });
+  await expect(page.locator("#reader-panel")).toBeHidden();
+  await page.locator("#source-list .source-item").filter({ hasText: "resume-first.pgn" })
+    .getByRole("button", { name: "Continue" }).click();
+  await expect(page.locator(".reader-title")).toContainText("White Two");
+  await expect(page.locator(".notation-body .mv.current")).toHaveCount(0);
+  await expect(page.locator('.board .sq[data-square="e2"] .piece')).toHaveAttribute("alt", "P");
+
+  await page.getByRole("button", { name: "Back to Game records" }).click();
+  await page.getByRole("button", { name: "Remove resume-first.pgn" }).click();
+  await expect(page.locator("#source-status")).toHaveText("idle");
+  await expect(page.getByRole("button", { name: "Remove resume-first.pgn" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Continue" })).toHaveCount(1);
+
+  await page.reload();
+  await expect(page.locator("#source-status")).toHaveText("idle", { timeout: 10_000 });
+  await expect(page.locator("#source-name")).toHaveText("No PGN source selected");
+  await expect(page.locator("#source-list .source-select-name")).toHaveText(["resume-second.pgn"]);
+  await expect(page.getByRole("button", { name: "Continue" })).toHaveCount(1);
+});
+
 test("keeps the main thread usable and bounds the searchable Game record list", async ({ page }) => {
   const source = Array.from({ length: 101 }, (_, index) => {
     const number = index + 1;

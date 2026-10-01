@@ -48,7 +48,7 @@ search.
 | Board state | **Server computes FEN per node during hydration** | UI never replays moves; every node carries its position. Costs response size (~100 bytes/node), saves all client-side chess logic and repeated recomputation. |
 | Frontend | **Desktop: vanilla ES modules with no build step; mobile: compiled static modules** | One dev, offline, no framework runtime. The desktop board uses locally vendored CBurnett SVG pieces and inline graphics overlays; the mobile build vendors the same pieces and its chess modules. |
 | Concurrency | **`LibraryService` owns Scan lifecycle; `src/scan-worker.ts` is a narrow worker adapter** | Keeps API responsive during multi-GB scans; progress is polled via `GET /api/files/{id}`. The Index replacement is transactional, so a failed replacement leaves the previous index intact, while remove/reset/shutdown are guarded by the same lifecycle owner. |
-| Mobile Library | **`PersistentMobileLibrary` with an IndexedDB snapshot** | The mobile adapter projects the existing Game record vocabulary, receives browser-worker Scan events, bounds list pages to 50 records without limiting the total, and stages an import separately from retained sources. One versioned IndexedDB record stores every source's bytes, metadata, spans, ordered Tag pairs, warnings, and Index records plus the active-source selection; source selection and removal change only after the Mobile Library snapshot write succeeds. Sources over 50 MiB and GameDocument spans over 8 MiB are rejected, and failed or cancelled imports leave the retained snapshot intact. |
+| Mobile Library | **`PersistentMobileLibrary` with an IndexedDB snapshot** | The mobile adapter projects the existing Game record vocabulary, receives browser-worker Scan events, bounds list pages to 50 records without limiting the total, and stages an import separately from retained sources. One versioned IndexedDB record stores every source's bytes, metadata, spans, ordered Tag pairs, warnings, Index records, optional per-source Resume bookmark, and active-source selection; source selection, bookmark updates, and removal change only after the Mobile Library snapshot write succeeds. Sources over 50 MiB and GameDocument spans over 8 MiB are rejected, and failed or cancelled imports leave the retained snapshot intact. |
 | Source fidelity | **`src/source.ts` owns fingerprint and span access** | Original bytes are never rewritten; Index stores offsets and ordered Tag pairs; source responses decode the indexed span as UTF-8 only after bounded, race-checked reads. Parser normalization affects the document model only, and changed or missing sources are refused rather than served through stale offsets. |
 
 ## 4. Parser strategy
@@ -176,12 +176,14 @@ Desktop uses these hash routes:
   sidelines as indented, bordered sub-blocks (collapsible at depth ≥ 3); NAG glyphs attach to
   their move token. Current node highlighted and kept scrolled into view. The board uses local
   CBurnett SVG pieces and renders `[%cal]`/`[%csl]` graphics.
-- `/mobile/` — standalone static client: choose one `.pgn`, confirm replacements, restore or clear
-  the persisted source, watch Scan status and progress, search roster metadata, and page through
-  at most 50 Game records at once without a total-count cap. Its persisted theme toggle changes the
-  complete surrounding UI palette while the standard wood square palette remains stable. In the
-  reader, control and keyboard move navigation keeps the board focused and leaves notation scroll
-  position unchanged; direct PGN token selection may scroll to that token.
+- `/mobile/` — standalone static client: choose `.pgn` sources, restore or remove retained sources,
+  select the active source, and use each source's optional Continue action to open its Resume
+  bookmark from the starting position. It watches Scan status and progress, searches roster
+  metadata, and pages through at most 50 Game records at once without a total-count cap. Its
+  persisted theme toggle changes the complete surrounding UI palette while the standard wood
+  square palette remains stable. In the reader, control and keyboard move navigation keeps the
+  board focused and leaves notation scroll position unchanged; direct PGN token selection may
+  scroll to that token, but reader node and board state are not part of the Resume bookmark.
 
 ## 9. Performance strategy
 
@@ -204,8 +206,9 @@ suite uses `tests/fixtures/contract_manifest.json` and separate temporary SQLite
 scan records, schema columns, indexed offsets, wire casing, ordered Tag pairs, flat GameDocument
 nodes, source text, and route error envelopes. Playwright covers the desktop browser workflow;
 `tests/mobile` serves only the compiled static client and verifies the worker-backed Scan/list,
-versioned precache, install metadata, network-blocked reader restoration, and browser-persistence
-slice without the desktop server.
+versioned precache, install metadata, network-blocked reader restoration, source-scoped Resume
+bookmarks, Continue from the starting position, and browser-persistence behavior without the
+desktop server.
 
 ## 11. Release strategy
 

@@ -2,7 +2,8 @@ import type { ScannedGame } from "../scan.js";
 import type { MobileGameRecord, MobileSourceRecord } from "./library.js";
 
 export const MOBILE_LEGACY_STORAGE_SCHEMA_VERSION = 1;
-export const MOBILE_STORAGE_SCHEMA_VERSION = 2;
+export const MOBILE_MULTI_SOURCE_STORAGE_SCHEMA_VERSION = 2;
+export const MOBILE_STORAGE_SCHEMA_VERSION = 3;
 
 const DEFAULT_DATABASE_NAME = "offline-pgn-reader-mobile";
 const STORE_NAME = "library";
@@ -25,7 +26,19 @@ export type MobileLibrarySnapshot = {
   sources: MobilePersistedSource[];
 };
 
-export type MobileLegacySourceRecord = Omit<MobileSourceRecord, "id">;
+export type MobileMultiSourceLibrarySnapshot = {
+  schemaVersion: typeof MOBILE_MULTI_SOURCE_STORAGE_SCHEMA_VERSION;
+  activeSourceId: number | null;
+  sources: MobilePersistedMultiSource[];
+};
+
+export type MobilePersistedMultiSource = {
+  source: Omit<MobileSourceRecord, "resumeBookmark">;
+  sourceBytes: ArrayBuffer;
+  games: MobilePersistedGame[];
+};
+
+export type MobileLegacySourceRecord = Omit<MobileSourceRecord, "id" | "resumeBookmark">;
 
 export type MobileLegacyLibrarySnapshot = {
   schemaVersion: typeof MOBILE_LEGACY_STORAGE_SCHEMA_VERSION;
@@ -34,7 +47,10 @@ export type MobileLegacyLibrarySnapshot = {
   games: MobilePersistedGame[];
 };
 
-export type MobileStoredSnapshot = MobileLibrarySnapshot | MobileLegacyLibrarySnapshot;
+export type MobileStoredSnapshot =
+  | MobileLibrarySnapshot
+  | MobileMultiSourceLibrarySnapshot
+  | MobileLegacyLibrarySnapshot;
 
 export interface MobileLibraryStorage {
   load(): Promise<MobileStoredSnapshot | null>;
@@ -236,6 +252,9 @@ function assertSnapshot(snapshot: MobileLibrarySnapshot): void {
 function isSnapshot(value: unknown): value is MobileStoredSnapshot {
   if (!isRecord(value)) return false;
   if (value.schemaVersion === MOBILE_STORAGE_SCHEMA_VERSION) return isCurrentSnapshot(value);
+  if (value.schemaVersion === MOBILE_MULTI_SOURCE_STORAGE_SCHEMA_VERSION) {
+    return isMultiSourceSnapshot(value);
+  }
   if (value.schemaVersion === MOBILE_LEGACY_STORAGE_SCHEMA_VERSION) return isLegacySnapshot(value);
   return false;
 }
@@ -243,6 +262,15 @@ function isSnapshot(value: unknown): value is MobileStoredSnapshot {
 function isCurrentSnapshot(value: Record<string, unknown>): value is MobileLibrarySnapshot {
   if (!isSafePositiveIntegerOrNull(value.activeSourceId) || !Array.isArray(value.sources)) return false;
   if (!value.sources.every(isPersistedSource)) return false;
+  const sources = value.sources;
+  const sourceIds = sources.map((source) => source.source.id);
+  if (new Set(sourceIds).size !== sourceIds.length) return false;
+  return value.activeSourceId === null || sourceIds.includes(value.activeSourceId);
+}
+
+function isMultiSourceSnapshot(value: Record<string, unknown>): value is MobileMultiSourceLibrarySnapshot {
+  if (!isSafePositiveIntegerOrNull(value.activeSourceId) || !Array.isArray(value.sources)) return false;
+  if (!value.sources.every(isPersistedMultiSource)) return false;
   const sources = value.sources;
   const sourceIds = sources.map((source) => source.source.id);
   if (new Set(sourceIds).size !== sourceIds.length) return false;
@@ -261,7 +289,23 @@ function isPersistedSource(value: unknown): value is MobilePersistedSource {
   return value.games.every((game) => isPersistedGame(game));
 }
 
+function isPersistedMultiSource(value: unknown): value is MobilePersistedMultiSource {
+  if (!isRecord(value) || !isArrayBuffer(value.sourceBytes) || !isMultiSource(value.source)) return false;
+  if (value.sourceBytes.byteLength !== value.source.size || !Array.isArray(value.games)) return false;
+  return value.games.every((game) => isPersistedGame(game));
+}
+
 function isSource(value: unknown): value is MobileSourceRecord {
+  if (!isSourceFields(value)) return false;
+  const source = value as MobileSourceRecord;
+  return source.resumeBookmark === null || isResumeBookmark(source.resumeBookmark);
+}
+
+function isMultiSource(value: unknown): value is Omit<MobileSourceRecord, "resumeBookmark"> {
+  return isSourceFields(value);
+}
+
+function isSourceFields(value: unknown): value is Record<string, unknown> {
   if (!isRecord(value)) return false;
   if (!isSafePositiveInteger(value.id) || typeof value.name !== "string" || !isSafeNonNegativeInteger(value.size)) return false;
   if (!isSafeNonNegativeInteger(value.game_count) || !isSafeNonNegativeInteger(value.warning_count)) return false;
@@ -270,6 +314,12 @@ function isSource(value: unknown): value is MobileSourceRecord {
   return isSafeNonNegativeInteger(value.progress.bytesDone) &&
     isSafeNonNegativeInteger(value.progress.bytesTotal) &&
     isSafeNonNegativeInteger(value.progress.gamesFound);
+}
+
+function isResumeBookmark(value: unknown): value is NonNullable<MobileSourceRecord["resumeBookmark"]> {
+  return isRecord(value) &&
+    isSafePositiveInteger(value.sourceId) &&
+    isSafePositiveInteger(value.gameId);
 }
 
 function isLegacySource(value: unknown): value is MobileLegacySourceRecord {

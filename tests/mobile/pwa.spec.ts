@@ -40,7 +40,7 @@ test("publishes install metadata and precaches the complete mobile build", async
   const workerResponse = await page.request.get("/service-worker.js");
   expect(workerResponse.ok()).toBe(true);
   const workerSource = await workerResponse.text();
-  expect(workerSource).toContain('const CACHE_NAME = "offline-pgn-reader-mobile-v3"');
+  expect(workerSource).toContain('const CACHE_NAME = "offline-pgn-reader-mobile-v4"');
   expect(workerSource).toContain("self.skipWaiting()");
   expect(workerSource).toContain("self.clients.claim()");
   expect(workerSource).toContain("caches.delete(key)");
@@ -61,7 +61,7 @@ test("publishes install metadata and precaches the complete mobile build", async
       paths: requests.map((request) => new URL(request.url).pathname),
     };
   });
-  expect(cacheState.name).toBe("offline-pgn-reader-mobile-v3");
+  expect(cacheState.name).toBe("offline-pgn-reader-mobile-v4");
   expect(cacheState.paths).toEqual(expect.arrayContaining(requiredCachedAssets));
 });
 
@@ -227,7 +227,7 @@ test("migrates a v1 one-source IndexedDB record without losing its Game record",
     };
   });
   expect(migrated).toEqual({
-    schemaVersion: 2,
+    schemaVersion: 3,
     activeSourceId: 1,
     sourceCount: 1,
     sourceBytes: new TextEncoder().encode(sourceText).byteLength,

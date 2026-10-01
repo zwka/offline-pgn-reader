@@ -152,6 +152,7 @@ function renderSourceList(sources: MobileSourceRecord[]): void {
 
 function renderSourceItem(source: MobileSourceRecord): HTMLElement {
   const active = source.id === library.activeSourceId;
+  const bookmark = source.resumeBookmark;
   const select = h(
     "button",
     {
@@ -171,6 +172,20 @@ function renderSourceItem(source: MobileSourceRecord): HTMLElement {
     void library.selectSource(source.id);
   });
 
+  const continueButton = bookmark
+    ? h(
+        "button",
+        {
+          class: "source-continue",
+          type: "button",
+        },
+        "Continue",
+      )
+    : null;
+  if (continueButton && bookmark) {
+    continueButton.addEventListener("click", () => continueSource(source.id, bookmark.gameId));
+  }
+
   const remove = h(
     "button",
     {
@@ -185,7 +200,13 @@ function renderSourceItem(source: MobileSourceRecord): HTMLElement {
     void library.removeSource(source.id);
   });
 
-  return h("div", { class: `source-item${active ? " source-item-active" : ""}`, role: "listitem" }, select, remove);
+  return h(
+    "div",
+    { class: `source-item${active ? " source-item-active" : ""}`, role: "listitem" },
+    select,
+    continueButton,
+    remove,
+  );
 }
 
 function renderSource(source: MobileSourceRecord | null): void {
@@ -359,6 +380,11 @@ async function loadGame(gameId: number, generation: number): Promise<void> {
       return;
     }
     activeReader = reader;
+    await library.rememberGame(document.fileId, document.gameId);
+    if (generation !== readerGeneration || selectedGameId !== gameId) {
+      reader.cleanup();
+      return;
+    }
   } catch (error) {
     if (generation !== readerGeneration || selectedGameId !== gameId) return;
     const message = error instanceof Error ? error.message : String(error);
@@ -388,6 +414,16 @@ function resetListView(): void {
   offset = 0;
   searchInput.value = "";
   renderGames();
+}
+
+function continueSource(sourceId: number, gameId: number): void {
+  resetListView();
+  void library.selectSource(sourceId).then(() => {
+    const source = library.sources.find((candidate) => candidate.id === sourceId);
+    const bookmark = source?.resumeBookmark;
+    if (library.activeSourceId !== sourceId || !bookmark || bookmark.gameId !== gameId) return;
+    openGame(bookmark.gameId);
+  });
 }
 
 function showReaderError(message: string): void {

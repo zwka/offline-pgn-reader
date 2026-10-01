@@ -47,6 +47,12 @@ Library and available to its Reader, or no source when the selection is empty.
 A candidate import is not active until its Scan and snapshot save both succeed.
 _Avoid_: Replacement source for a candidate that has not been committed
 
+**Resume bookmark**:
+The one automatic bookmark retained for a source after a Game record successfully
+opens. It identifies only the source and Game record and always reopens that Game
+record from its starting position.
+_Avoid_: Reading position, move bookmark, node bookmark
+
 **Scan**:
 The process of reading a PGN source to discover its games and update the library's index.
 _Avoid_: Import, parse

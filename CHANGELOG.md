@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **Mobile Resume bookmarks**: each retained source now remembers the latest
+  successfully opened Game record, persists that bookmark with the active-source
+  selection, and offers Continue from the Game record's starting position.
 - **Mobile release gate**: Playwright coverage now runs the mobile PWA through
   emulated Pixel 7 Chromium and iPhone 13 WebKit workflows, including Scan
   progress, multi-source IndexedDB persistence, offline reload/cache restore,

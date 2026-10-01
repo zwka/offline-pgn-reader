@@ -210,6 +210,18 @@ h2 { font-size: 18px; line-height: 1.25; margin: 0; }
   font-size: 12px;
   padding: 7px 9px;
 }
+.source-continue {
+  align-self: stretch;
+  background: var(--teal);
+  border: 1px solid var(--teal);
+  border-radius: 5px;
+  color: #fff;
+  flex: 0 0 auto;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 7px 9px;
+}
+.source-continue:hover { background: var(--accent-dark); border-color: var(--accent-dark); }
 .source-remove:hover { border-color: var(--bad); color: var(--bad); }
 .source-panel > .section-heading {
   border-top: 1px solid var(--line);

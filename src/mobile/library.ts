@@ -5,7 +5,8 @@ import type { MobileScanMessage, MobileScanRequest } from "./scan-protocol.js";
 import type { GameDocument } from "../wire.js";
 import {
   IndexedDbMobileStorage,
-  MOBILE_LEGACY_STORAGE_SCHEMA_VERSION,
+  MOBILE_MULTI_SOURCE_STORAGE_SCHEMA_VERSION,
+  MOBILE_STORAGE_SCHEMA_VERSION,
   type MobileLibrarySnapshot,
   type MobileLibraryStorage,
   type MobileStoredSnapshot,
@@ -23,6 +24,11 @@ export type MobileScanProgress = {
   gamesFound: number;
 };
 
+export type MobileResumeBookmark = {
+  sourceId: number;
+  gameId: number;
+};
+
 export type MobileSourceRecord = {
   id: number;
   name: string;
@@ -32,6 +38,7 @@ export type MobileSourceRecord = {
   scan_status: MobileScanStatus;
   scan_error: string | null;
   progress: MobileScanProgress | null;
+  resumeBookmark: MobileResumeBookmark | null;
 };
 
 export type MobileSourceInput = {
@@ -107,6 +114,7 @@ export interface MobileLibrary {
   cancelReplacement(): void;
   listGames(query?: string, offset?: number, limit?: number): MobileGamePage;
   getGameDocument(gameId: number): Promise<GameDocument>;
+  rememberGame(sourceId: number, gameId: number): Promise<void>;
   subscribe(listener: MobileLibraryListener): () => void;
   close(): void;
 }
@@ -236,6 +244,20 @@ export class InMemoryMobileLibrary implements MobileLibrary {
     return getMobileGameDocument(state?.blob ?? null, state?.source ?? null, state?.games ?? [], gameId);
   }
 
+  rememberGame(sourceId: number, gameId: number): Promise<void> {
+    const state = this.sourceStates.get(sourceId);
+    if (!state || !state.games.some(({ record }) => record.id === gameId)) return Promise.resolve();
+    if (state.source.resumeBookmark?.sourceId === sourceId && state.source.resumeBookmark.gameId === gameId) {
+      return Promise.resolve();
+    }
+    state.source = {
+      ...state.source,
+      resumeBookmark: { sourceId, gameId },
+    };
+    this.emit();
+    return Promise.resolve();
+  }
+
   subscribe(listener: MobileLibraryListener): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
@@ -350,6 +372,7 @@ export class PersistentMobileLibrary implements MobileLibrary {
   private lastError: string | null = null;
   private initialized = false;
   private readonly initialization: Promise<void>;
+  private persistenceQueue: Promise<void> = Promise.resolve();
   private readonly listeners = new Set<MobileLibraryListener>();
 
   constructor(
@@ -437,6 +460,14 @@ export class PersistentMobileLibrary implements MobileLibrary {
     return getMobileGameDocument(state?.blob ?? null, state?.source ?? null, state?.games ?? [], gameId);
   }
 
+  rememberGame(sourceId: number, gameId: number): Promise<void> {
+    if (!this.initialized) return this.initialization.then(() => this.rememberGame(sourceId, gameId));
+    if (this.pending?.phase === "committing") {
+      return this.pending.completion.then(() => this.rememberGame(sourceId, gameId));
+    }
+    return this.persistResumeBookmark(sourceId, gameId);
+  }
+
   subscribe(listener: MobileLibraryListener): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
@@ -453,7 +484,7 @@ export class PersistentMobileLibrary implements MobileLibrary {
       if (snapshot) {
         const migrated = migrateSnapshot(snapshot);
         this.restoreSnapshot(migrated);
-        if (snapshot.schemaVersion === MOBILE_LEGACY_STORAGE_SCHEMA_VERSION) {
+        if (snapshot.schemaVersion !== MOBILE_STORAGE_SCHEMA_VERSION) {
           try {
             await this.storage.save(migrated);
           } catch (error) {
@@ -613,22 +644,24 @@ export class PersistentMobileLibrary implements MobileLibrary {
       const sourceBytes = await readBlobBytes(pending.input.blob);
       const games = assignGameIds(pending.games, nextGameId(this.sourceStates.values()));
       const source = readySourceRecord(pending.sourceId, pending.input.name, sourceBytes.byteLength, games);
-      const candidate = new Map(this.sourceStates);
-      candidate.set(pending.sourceId, {
-        source,
-        blob: pending.input.blob,
-        bytes: sourceBytes,
-        games,
-      });
-      const snapshot = await snapshotForStates(candidate, pending.sourceId);
-      await this.storage.save(snapshot);
+      await this.enqueuePersistence(async () => {
+        const candidate = new Map(this.sourceStates);
+        candidate.set(pending.sourceId, {
+          source,
+          blob: pending.input.blob,
+          bytes: sourceBytes,
+          games,
+        });
+        const snapshot = await snapshotForStates(candidate, pending.sourceId);
+        await this.storage.save(snapshot);
 
-      if (this.pending !== pending) return;
-      this.sourceStates = candidate;
-      this.currentSourceId = pending.sourceId;
-      this.pending = null;
-      this.lastError = null;
-      this.emit();
+        if (this.pending !== pending) return;
+        this.sourceStates = candidate;
+        this.currentSourceId = pending.sourceId;
+        this.pending = null;
+        this.lastError = null;
+        this.emit();
+      });
     } catch (error) {
       if (this.pending === pending) {
         this.pending = null;
@@ -641,32 +674,69 @@ export class PersistentMobileLibrary implements MobileLibrary {
   }
 
   private async persistSelection(sourceId: number): Promise<void> {
-    try {
-      await this.storage.save(await snapshotForStates(this.sourceStates, sourceId));
-      this.currentSourceId = sourceId;
-      this.lastError = null;
-      this.emit();
-    } catch (error) {
-      this.lastError = errorMessage(error);
-      this.emit();
-    }
+    return this.enqueuePersistence(async () => {
+      if (!this.sourceStates.has(sourceId)) return;
+      try {
+        await this.storage.save(await snapshotForStates(this.sourceStates, sourceId));
+        this.currentSourceId = sourceId;
+        this.lastError = null;
+        this.emit();
+      } catch (error) {
+        this.lastError = errorMessage(error);
+        this.emit();
+      }
+    });
+  }
+
+  private async persistResumeBookmark(sourceId: number, gameId: number): Promise<void> {
+    return this.enqueuePersistence(async () => {
+      const state = this.sourceStates.get(sourceId);
+      if (!state || !state.games.some(({ record }) => record.id === gameId)) return;
+      if (state.source.resumeBookmark?.sourceId === sourceId && state.source.resumeBookmark.gameId === gameId) return;
+
+      const candidate = new Map(this.sourceStates);
+      candidate.set(sourceId, {
+        ...state,
+        source: {
+          ...state.source,
+          resumeBookmark: { sourceId, gameId },
+        },
+      });
+      try {
+        await this.storage.save(await snapshotForStates(candidate, this.currentSourceId));
+        this.sourceStates = candidate;
+        this.lastError = null;
+        this.emit();
+      } catch (error) {
+        this.lastError = errorMessage(error);
+        this.emit();
+      }
+    });
   }
 
   private async removeStoredSource(sourceId: number): Promise<void> {
-    if (!this.sourceStates.has(sourceId)) return;
-    const candidate = new Map(this.sourceStates);
-    candidate.delete(sourceId);
-    const activeSourceId = this.currentSourceId === sourceId ? null : this.currentSourceId;
-    try {
-      await this.storage.save(await snapshotForStates(candidate, activeSourceId));
-      this.sourceStates = candidate;
-      this.currentSourceId = activeSourceId;
-      this.lastError = null;
-      this.emit();
-    } catch (error) {
-      this.lastError = errorMessage(error);
-      this.emit();
-    }
+    return this.enqueuePersistence(async () => {
+      if (!this.sourceStates.has(sourceId)) return;
+      const candidate = new Map(this.sourceStates);
+      candidate.delete(sourceId);
+      const activeSourceId = this.currentSourceId === sourceId ? null : this.currentSourceId;
+      try {
+        await this.storage.save(await snapshotForStates(candidate, activeSourceId));
+        this.sourceStates = candidate;
+        this.currentSourceId = activeSourceId;
+        this.lastError = null;
+        this.emit();
+      } catch (error) {
+        this.lastError = errorMessage(error);
+        this.emit();
+      }
+    });
+  }
+
+  private enqueuePersistence(operation: () => Promise<void>): Promise<void> {
+    const next = this.persistenceQueue.then(operation, operation);
+    this.persistenceQueue = next.catch(() => undefined);
+    return next;
   }
 
   private failWithoutReplacement(message: string, resolve: () => void): void {
@@ -801,19 +871,30 @@ async function snapshotForStates(
     });
   }
   return {
-    schemaVersion: 2,
+    schemaVersion: MOBILE_STORAGE_SCHEMA_VERSION,
     activeSourceId,
     sources,
   };
 }
 
 function migrateSnapshot(snapshot: MobileStoredSnapshot): MobileLibrarySnapshot {
-  if (snapshot.schemaVersion !== MOBILE_LEGACY_STORAGE_SCHEMA_VERSION) return snapshot;
+  if (snapshot.schemaVersion === MOBILE_STORAGE_SCHEMA_VERSION) return snapshot;
+  if (snapshot.schemaVersion === MOBILE_MULTI_SOURCE_STORAGE_SCHEMA_VERSION) {
+    return {
+      schemaVersion: MOBILE_STORAGE_SCHEMA_VERSION,
+      activeSourceId: snapshot.activeSourceId,
+      sources: snapshot.sources.map(({ source, sourceBytes, games }) => ({
+        source: { ...source, resumeBookmark: null },
+        sourceBytes: sourceBytes.slice(0),
+        games: games.map(copyGameEntry),
+      })),
+    };
+  }
   return {
-    schemaVersion: 2,
+    schemaVersion: MOBILE_STORAGE_SCHEMA_VERSION,
     activeSourceId: 1,
     sources: [{
-      source: { id: 1, ...snapshot.source },
+      source: { id: 1, ...snapshot.source, resumeBookmark: null },
       sourceBytes: snapshot.sourceBytes.slice(0),
       games: snapshot.games.map(copyGameEntry),
     }],
@@ -829,6 +910,12 @@ function validatePersistedSource(
     source.game_count !== games.length ||
     source.warning_count !== games.filter(({ record }) => record.warning !== null).length) {
     throw new Error("Stored Mobile Library data is invalid.");
+  }
+  if (source.resumeBookmark && (
+    source.resumeBookmark.sourceId !== source.id ||
+    !games.some(({ record }) => record.id === source.resumeBookmark?.gameId)
+  )) {
+    throw new Error("Stored Mobile Library data has an invalid Resume bookmark.");
   }
   for (const entry of games) {
     const span = entry.scanned.offsetEnd - entry.scanned.offsetStart;
@@ -898,6 +985,7 @@ function readySourceRecord(
       bytesTotal: size,
       gamesFound: games.length,
     },
+    resumeBookmark: null,
   };
 }
 
@@ -969,6 +1057,7 @@ function copySource(source: MobileSourceRecord): MobileSourceRecord {
   return {
     ...source,
     progress: source.progress ? { ...source.progress } : null,
+    resumeBookmark: source.resumeBookmark ? { ...source.resumeBookmark } : null,
   };
 }
 
