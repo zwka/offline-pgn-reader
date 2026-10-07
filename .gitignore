@@ -6,3 +6,4 @@ playwright-report/
 test-results/
 mobile/dist/
 .benchmark-scan-*/
+.artifacts/
