@@ -12,6 +12,7 @@ export default defineConfig({
     baseURL,
     trace: "on-first-retry",
   },
+  testIgnore: "**/wide.spec.ts",
   projects: [
     {
       name: "android-chromium",

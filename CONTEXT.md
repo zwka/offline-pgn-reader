@@ -35,8 +35,8 @@ record data in a versioned IndexedDB snapshot. The current snapshot schema is
 v3; v1 and v2 snapshots migrate on restore. Importing another valid source
 retains existing sources and makes the imported source active. Sources may
 contain any number of Game records. This constraint applies only to the Mobile
-Library; the desktop Library remains multi-source.
-_Avoid_: Mobile collection, mobile catalog, Desktop Index when naming mobile state
+Library; the server-side Library remains multi-source.
+_Avoid_: Mobile collection, mobile catalog, server Index when naming mobile state
 
 **Imported source**:
 A PGN source selected by the user and taken into the Mobile Library for reading, independent of the source file's original device location.

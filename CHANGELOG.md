@@ -6,6 +6,11 @@
   and npm scripts used in the repository, the generated mobile cache name, and
   recognized current Mobile Library schema references. It runs first in
   `npm run test:all`.
+- **Single browser client**: the compiled mobile PWA is now the only browser
+  application. Fastify serves `mobile/` at `/`, and the same client is verified
+  at wide desktop and phone viewport sizes.
+- **Mobile assets**: the CBurnett piece set now lives in `mobile/pieces/`, so the
+  mobile build has no dependency on the retired browser UI tree.
 - **Mobile Resume bookmarks**: each retained source now remembers the latest
   successfully opened Game record, persists that bookmark with the active-source
   selection, and offers Continue from the Game record's starting position.
@@ -14,9 +19,9 @@
   progress, multi-source IndexedDB persistence, offline reload/cache restore,
   import recovery, independent removal, search, touch reader controls, and the
   50 MiB / 8 MiB safety boundaries.
-- **Desktop workflow protection**: the acceptance suite explicitly keeps
-  multiple PGN sources available in the desktop Library. The mobile PWA now
-  retains multiple imported sources without changing the desktop path.
+- **Mobile workflow protection**: the acceptance suite keeps multiple PGN sources
+  available in the Mobile Library. The server and CLI retain their filesystem
+  workflows without maintaining a second browser UI.
 - **Mobile PWA**: the standalone `mobile/` build scans a selected PGN source in
   a browser worker, lazily opens GameDocuments from retained source bytes, and
   serves an installable, versioned offline shell after its initial HTTPS load
@@ -30,10 +35,10 @@
   8 MiB, while the 50-record page size does not cap the total record count. The
   current snapshot schema is v3; v1 and v2 snapshots migrate on restore without
   inventing Resume bookmarks.
-- **Runtime cleanup**: the former Python/FastAPI rollback runtime was removed.
-  Node.js is the sole server-side production runtime, and TypeScript owns the
-  server implementation and verification suite. The desktop browser client
-  remains vanilla JavaScript.
+- **Runtime cleanup**: the former Python/FastAPI rollback runtime and the
+  separate desktop browser UI were removed. Node.js is the sole server-side
+  production runtime, and TypeScript owns the server implementation and
+  verification suite.
 
 ## 1.1.0 — 2026-08-09
 
@@ -54,7 +59,7 @@
   last-move highlight; shapes reposition correctly when the board is flipped.
   Raw PGN source remains byte-exact.
 - **CBurnett pieces**: replaced Unicode glyphs with the CBurnett SVG set
-  (Lichess default), vendored locally in `frontend/pieces/` — still fully
+  (Lichess default), vendored locally in `frontend/pieces/` and still fully
   offline.
 - **Fixed board square jitter**: grid rows are now fixed `1fr` tracks, so
   square size no longer depends on piece placement and never shifts between

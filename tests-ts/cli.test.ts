@@ -32,7 +32,7 @@ function testConfig(directory: string): AppConfig {
     version: "1.1.0",
     debug: false,
     maxGameBytes: 8 * 1024 * 1024,
-    frontendDir: resolve("frontend"),
+    mobileDir: resolve("mobile"),
     dbPath: join(directory, "data", "index.sqlite3"),
     watchDirs: [],
     uploadDir: join(directory, "library"),

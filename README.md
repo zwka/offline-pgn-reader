@@ -1,6 +1,6 @@
 # Offline PGN Reader
 
-Read and study chess games from PGN files on your computer.
+Read and study chess games from PGN files in a browser on a computer or phone.
 
 [PGN](https://en.wikipedia.org/wiki/Portable_Game_Notation) (Portable Game
 Notation) is the text format used to store chess games. Offline PGN Reader
@@ -42,23 +42,24 @@ if `nvm` or `npm` is not available.
 
 ### Start the app
 
-Run:
+Build the browser client, then start the local server:
 
 ```bash
+npm run build:mobile
 npm start
 ```
 
-Open <http://127.0.0.1:8642> in your browser. Keep the terminal window open
-while you use the app; the local server runs there. Press `Ctrl+C` in that
-terminal when you want to stop it.
+Open <http://127.0.0.1:8642> in a browser. The same mobile PWA runs at phone
+and desktop viewport sizes. Keep the terminal open while you use the app.
+Press `Ctrl+C` in that terminal when you want to stop it.
 
-### Try the mobile client
+### Use the browser app
 
-The mobile client is the mobile PWA target: a separate static browser build
-that scans and persists multiple imported `.pgn` sources in a Web Worker and a
-versioned IndexedDB Mobile Library. One retained source is active at a time,
-and the source list can be switched without opening a Game automatically.
-It does not connect to the desktop server or use the desktop Library Index.
+The browser app is a static mobile PWA. It scans and persists multiple imported
+`.pgn` sources in a Web Worker and a versioned IndexedDB Mobile Library. One
+retained source is active at a time, and the source list can be switched without
+opening a Game automatically. The PWA does not call the server API or use its
+SQLite Index.
 A phone needs one initial online load over HTTPS, or installation while online,
 to receive the PWA shell and service-worker cache. After that setup, the
 persisted Mobile Library and Reader work offline.
@@ -87,7 +88,7 @@ Open <http://127.0.0.1:8431>. The static server is only needed to load browser
 modules and workers; no Node process is needed while using the mobile client.
 
 To open the PWA on a phone, use a temporary HTTPS Cloudflare Quick Tunnel. The
-tunnel exposes the static mobile build, not the desktop server or its Library.
+tunnel exposes the static mobile build.
 
 1. Install `cloudflared`. On macOS with Homebrew, run:
 
@@ -129,23 +130,18 @@ from v1 (one source) and v2 (multiple sources without Resume bookmarks) migrate
 on restore; source bytes and Game records are retained, and older snapshots
 start with no Resume bookmarks. For a permanent phone installation, publish the
 complete `mobile/` directory through any HTTPS host. The Mobile Library
-persistence applies only to this PWA. The
-desktop `npm start` Library is the Node/Fastify/SQLite, filesystem-backed path
-and still supports multiple PGN sources.
+persistence applies only to this PWA. The Node/Fastify/SQLite server remains
+available for its API and CLI workflows, but it does not provide a second
+browser UI.
 
-### Read your first desktop game
+### Read your first Game record
 
-1. Open the **Library** page. PGN sources in `samples/` and `library/` appear
-   automatically.
-2. Add a source. Click **Index** beside a discovered source, paste the full
-   path to a `.pgn` file and click **Index path**, or choose **Upload copy...**
-   to place a copy in `library/`.
-3. Wait until the source shows `ready` and a game count. This means the Scan
-   has finished and the Index is ready to use. Large sources can take longer.
-4. Click the source name to see its game records. Use the search box to filter
-   by player, event, site, date, opening, or ECO code.
-5. Click a game record to open the Reader. Click moves in the notation or use
-   the board controls to move through the game.
+1. Choose **Choose PGN source** and select a local `.pgn` file.
+2. Wait until the source shows `ready` and a Game record count.
+3. Use **Search metadata** to filter by player, event, site, date, opening, or
+   ECO code.
+4. Choose a Game record to open the Reader. Use the notation or board controls
+   to move through the game.
 
 ### Reader controls
 
@@ -162,24 +158,26 @@ the original source text.
 | `[` / `]` | Open the previous / next game in the source |
 | `f` | Flip the board |
 | `p` | Show or hide the Raw PGN source |
-| `Esc` | Close the keyboard-shortcut help dialog |
-
-Click the `?` button in the top bar to see these shortcuts in the app.
 
 ## What the app supports
 
-- Large PGN sources are scanned in one pass with bounded memory. The Index
-  stores game locations and tag pairs so opening one game does not require
-  reading the whole source again. See [the scan benchmark report](docs/benchmarks/typescript-scan.md).
+- The browser Scan reads an imported source in one pass with bounded memory.
+  The PWA retains source bytes and Game records in the Mobile Library.
 - Comments in braces, comments that start with a semicolon, move-quality marks
   such as `!` and `?`, nested Variations, comments before the first move, and
   custom starting positions are retained as far as the source allows.
 - Malformed game records are flagged with warnings instead of preventing all
   neighboring game records from being indexed.
-- Source fingerprints detect changes. A changed source is marked `stale` until
-  you use **Re-scan**. An unchanged source can skip a repeated Scan.
 - Arrows (`[%cal]`) and square highlights (`[%csl]`) inside comments are shown
   on the board.
+
+## Server and CLI support
+
+- Large PGN sources are scanned in one pass with bounded memory. The server
+  Index stores game locations and tag pairs so opening one game does not
+  require reading the whole source again. See [the scan benchmark report](docs/benchmarks/typescript-scan.md).
+- Source fingerprints detect changes. The server marks a changed source `stale`
+  until you rescan it. An unchanged source can skip a repeated Scan.
 
 ## Troubleshooting
 
@@ -223,49 +221,53 @@ npm start -- serve --port 8643
 
 Then open <http://127.0.0.1:8643>.
 
-### The Library is empty
+### The Mobile Library is empty
 
-The automatic list only includes `.pgn` files inside the configured discovery
-directories. Use **Upload copy...** for a file anywhere on your computer, or
-paste its absolute path into **Add files**. The path must name a file, not a
-folder, and the file name must end in `.pgn`.
+Choose **Choose PGN source** and select a file whose name ends in `.pgn`.
 
-### A source stays `scanning` or shows `error`
+### A mobile import fails
 
-Large sources can take time. Wait for the progress indicator to finish. For an
-`error`, read the error text on the source card and the terminal output, check
-that the PGN source still exists and can be read, then click **Re-scan**.
+Read the error below the source status. Check that the selected file is readable,
+has a `.pgn` name, and is within the 50 MiB source limit before importing it
+again.
 
-For a command-line Scan, quote paths that contain spaces:
+### A server Scan stays `scanning` or shows `error`
+
+Large server sources can take time. Read the terminal output or query the server
+API for the Scan status. To rescan a source from the CLI, quote paths that
+contain spaces:
 
 ```bash
 npm start -- index --force "/path/to/Chess files/study.pgn"
 ```
 
-### A source is marked `stale`
+### A server source is marked `stale`
 
-The PGN source changed after its Index was built. Click **Re-scan (changed)**
-to replace its game records with records from the current source.
+The PGN source changed after its server Index was built. Run
+`npm start -- index --force PATH` to replace its Game records.
 
-### A game has a warning or will not open
+### A Game record has a warning or will not open
 
 Warnings identify malformed parts of a PGN source. The game may still be
 readable; open it and check the warning details or **Raw PGN source**. If the
-source still exists but was edited or replaced, run **Re-scan** first. If it was
-moved or renamed, use **Remove** and add the new path.
+source still exists but was edited or replaced, import it again. The server CLI
+can rescan a moved source with `npm start -- index --force PATH`.
 
-One desktop Game record can be read only up to the default 8 MiB safety limit. A
-malformed source with an unterminated comment can make several games look like
-one very large record. Correct the PGN source, or increase the desktop limit
-with `PGNREADER_MAX_GAME_BYTES` as described in [Configuration](#configuration).
-The mobile PWA always enforces its 8 MiB GameDocument limit and its 50 MiB
-source limit; `PGNREADER_MAX_GAME_BYTES` does not change those limits.
+A mobile Game record can be read only up to the 8 MiB safety limit. A malformed
+source with an unterminated comment can make several games look like one very
+large record. Correct the PGN source before importing it. The PWA also limits a
+source to 50 MiB.
 
-### I used **Reset Library** or **Remove**
+### I removed a retained source
 
-Those actions remove records from the local Index. They do not delete or edit
-the PGN source. Add the source again and wait for `ready` if you need to
-rebuild its records.
+**Remove source** deletes that source from the browser Mobile Library. It does
+not delete a file on disk or change the server Index.
+
+### I used server **reset** or **remove**
+
+Those commands remove records from the server Index. They do not delete or edit
+the PGN source. Run `npm start -- index PATH` again when you need to rebuild the
+records.
 
 ## Commands
 
@@ -273,6 +275,7 @@ Run these commands from the project folder:
 
 | Action | Command |
 |---|---|
+| Build the browser client | `npm run build:mobile` |
 | Start the local server | `npm start` |
 | Start on a chosen port | `npm start -- serve --port PORT` |
 | Scan one or more PGN sources | `npm start -- index PATH...` |
@@ -281,9 +284,9 @@ Run these commands from the project folder:
 | Show command help | `npm start -- --help` |
 | Start the development server | `npm run dev` |
 | Typecheck and build generated artifacts | `npm run build` |
-| Build the mobile client | `npm run build:mobile` |
 | Check documentation links and generated claims | `npm run check:docs` |
 | Run the complete release gate | `npm run test:all` |
+| Test the wide browser layout | `npm run test:wide` |
 | Test the mobile client | `npm run test:mobile` |
 
 Running `npm start` with no subcommand uses the configured host and port. The
@@ -294,8 +297,8 @@ currently has no effect.
 
 ## Configuration
 
-These settings apply to the desktop Node/Fastify/SQLite server. The mobile PWA
-uses its browser IndexedDB Mobile Library instead of these filesystem settings.
+These settings apply to the Node/Fastify/SQLite server and its CLI. The browser
+PWA uses its browser IndexedDB Mobile Library instead of these filesystem settings.
 All settings are optional. Set them in the environment before starting the
 server or running a command.
 
@@ -322,9 +325,9 @@ npm start -- serve --port 8643
 
 ## Files and backup
 
-The following file and Index operations describe the desktop server path. The
-mobile PWA stores retained sources in browser IndexedDB and uses **Remove
-source** to remove the active source.
+The following file and Index operations describe the server and CLI path. The
+browser PWA stores retained sources in browser IndexedDB and uses **Remove
+source** to remove a retained source.
 
 `data/index.sqlite3` is a local Index derived from your PGN sources. It can be
 rebuilt at any time. Back up the PGN sources themselves; the Index is not the
@@ -341,9 +344,8 @@ upgrade requires it.
 
 ## For developers
 
-The desktop runtime is a single TypeScript process with a vanilla JavaScript
-browser interface; the mobile client is a separately compiled static build. Run
-the checks with:
+The browser app is a separately compiled static mobile build. The Node runtime
+provides the local server, API, and CLI. Run the checks with:
 
 ```bash
 npm run check:docs
@@ -353,18 +355,18 @@ npm test
 npm run test:contracts
 npx playwright install chromium
 npx playwright install webkit
-npm run test:browser
+npm run test:wide
 npm run test:mobile
 npm run test:all
 ```
 
-The browser checks use Playwright Chromium. The mobile checks use emulated
-Pixel 7 Chromium and iPhone 13 WebKit; `npx playwright install webkit` is
-needed once for the WebKit project and may need internet access. These are
-browser emulations, not physical Android or iOS hardware. `npm run test:all`
-runs type checking, contract tests, TypeScript tests, desktop browser tests,
-and both mobile browser projects together. The browser tests start isolated
-servers and do not use the default `data/` Index.
+The wide browser check uses Playwright Desktop Chromium. The mobile checks use
+emulated Pixel 7 Chromium and iPhone 13 WebKit. Run `npx playwright install
+webkit` once for the WebKit project when needed. These are browser emulations,
+not physical Android or iOS hardware. `npm run test:all` runs type checking,
+contract tests, TypeScript tests, the wide PWA check, and both mobile browser
+projects. The browser tests start isolated servers and do not use the default
+`data/` Index.
 
 The production Scan benchmark can be run with:
 
@@ -377,9 +379,8 @@ See [docs/DESIGN.md](docs/DESIGN.md) for the architecture record and
 source areas are:
 
 ```
-frontend/            Browser interface (board, notation tree, Library)
-frontend/pieces/     Local CBurnett SVG chess pieces
-mobile/               Standalone static mobile client and generated build
+mobile/               Sole static browser client and generated build
+mobile/pieces/        Local CBurnett SVG chess pieces
 src/mobile/           Persistent Mobile Library and browser Scan worker
 src/server.ts        Fastify routes and static hosting
 src/library.ts       Library intake and Scan lifecycle
@@ -394,7 +395,6 @@ src/hydration.ts     Per-game hydration through chess.js
 src/database.ts      SQLite schema and connection lifecycle
 tests/               Shared PGN sources and contract fixtures
 tests-ts/            TypeScript behavior and integration tests
-tests/browser/       Desktop Playwright tests
 tests/mobile/        Mobile Playwright tests
 scripts/check-docs.mjs Documentation consistency checker
 ```
@@ -421,6 +421,6 @@ scripts/check-docs.mjs Documentation consistency checker
 ## Credits
 
 Chess pieces: the **CBurnett** SVG set by Colin M.L. Burnett, the Lichess
-default set, vendored locally in `frontend/pieces/`. It is licensed under
+default set, vendored locally in `mobile/pieces/`. It is licensed under
 GPLv2+ and is also available under BSD/GFDL. Source:
 <https://github.com/lichess-org/lila/tree/master/public/piece/cburnett>

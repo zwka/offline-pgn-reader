@@ -7,8 +7,8 @@ const baseURL = `http://127.0.0.1:${port}`;
 const browserDataDir = join(tmpdir(), `offline-pgn-reader-playwright-${process.pid}`);
 
 export default defineConfig({
-  testDir: "tests/browser",
-  fullyParallel: true,
+  testDir: "tests/mobile",
+  testMatch: "**/wide.spec.ts",
   retries: process.env.CI ? 2 : 0,
   reporter: "line",
   use: {
@@ -17,7 +17,7 @@ export default defineConfig({
     ...devices["Desktop Chrome"],
   },
   webServer: {
-    command: "npm start",
+    command: "npm run build:mobile && npm start",
     env: {
       PGNREADER_DATA_DIR: browserDataDir,
       PGNREADER_PORT: port,

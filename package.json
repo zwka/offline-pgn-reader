@@ -18,11 +18,11 @@
     "test": "vitest run",
     "test:ts": "vitest run",
     "test:watch": "vitest",
-    "test:browser": "playwright test",
+    "test:wide": "playwright test --config=playwright.config.ts",
     "test:mobile": "playwright test --config=playwright.mobile.config.ts",
     "test:contracts": "vitest run tests-ts/contracts.test.ts",
     "check:docs": "node scripts/check-docs.mjs",
-    "test:all": "npm run check:docs && npm run typecheck && npm run test:contracts && npm run test:ts -- --exclude tests-ts/contracts.test.ts && npm run test:browser && npm run test:mobile"
+    "test:all": "npm run check:docs && npm run typecheck && npm run test:contracts && npm run test:ts -- --exclude tests-ts/contracts.test.ts && npm run test:wide && npm run test:mobile"
   },
   "dependencies": {
     "@fastify/multipart": "^10.1.0",

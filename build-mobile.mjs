@@ -18,11 +18,6 @@ await cp(
   join(vendorDirectory, "pgn.js"),
   { force: true },
 );
-await cp(
-  join(root, "frontend", "pieces"),
-  join(root, "mobile", "pieces"),
-  { recursive: true, force: true },
-);
 
 const assets = await collectAssets(mobileDirectory);
 await writeFile(

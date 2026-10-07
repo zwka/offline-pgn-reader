@@ -3,8 +3,8 @@
 The final gate is `npm run test:all`. It starts with the documentation checker,
 then runs TypeScript type checking, Vitest, TypeScript behavior contracts, and
 Playwright browser tests. Node.js is the sole server-side production runtime.
-The desktop browser client remains vanilla JavaScript, and the mobile build
-emits browser JavaScript. The contract suite uses the shared PGN source fixtures
+The mobile build is the only browser client and emits the browser JavaScript.
+The wide browser check serves that same build through Fastify. The contract suite uses the shared PGN source fixtures
 and checks the observable behavior of the Index, SQLite schema, HTTP wire
 responses, source spans, ordered Tag pairs, and GameDocument payloads.
 
@@ -23,9 +23,9 @@ responses, source spans, ordered Tag pairs, and GameDocument payloads.
 | 9 | FEN/SetUp | invalid FEN, mid-game ply and move numbers | `tests-ts/hydration.test.ts` | Starting positions and warnings are covered |
 | 10 | Malformed PGN tolerance | garbage tokens, broken records | `tests-ts/hydration.test.ts`, `tests-ts/scan.test.ts` | Neighboring records remain readable and warnings are surfaced |
 | 11 | File re-scan | missed changes, failed replacement, interrupted scans | `tests-ts/index.test.ts`, `tests-ts/scan.test.ts`, `tests-ts/scan-lifecycle.test.ts`, `tests-ts/cli.test.ts` | Fingerprint, replacement, retry, and lifecycle protections are covered |
-| 12 | Browser compatibility | local assets, source intake, reader workflows | `tests/browser/smoke.spec.ts`, `playwright.config.ts` | Desktop Chromium covers Library, multiple sources, game list, reader, source, graphics, variations, removal, and reset |
-| 13 | Notation rendering | variation context loss, comment blobs, large trees | `tests/browser/smoke.spec.ts`, `tests/mobile/smoke.spec.ts`, `frontend/notation.js` | Desktop Reader rendering is covered. The explicit large-document yielding test runs in the mobile client. |
-| 14 | Navigation correctness | wrong sibling cycling, dead ends | `tests/browser/smoke.spec.ts`, `tests/fixtures/variations.pgn` | Keyboard navigation follows the GameDocument tree |
+| 12 | Browser compatibility | local assets, source intake, reader workflows | `tests/mobile/wide.spec.ts`, `tests/mobile/smoke.spec.ts`, `playwright.config.ts` | Desktop Chromium and mobile browser projects exercise the same PWA at wide and phone viewport sizes |
+| 13 | Notation rendering | variation context loss, comment blobs, large trees | `tests/mobile/smoke.spec.ts`, `tests/mobile/pwa.spec.ts`, `src/mobile/reader-notation.ts` | Mobile Reader rendering and large-document yielding are covered |
+| 14 | Navigation correctness | wrong sibling cycling, dead ends | `tests/mobile/smoke.spec.ts`, `tests/fixtures/variations.pgn` | Keyboard and touch navigation follow the GameDocument tree |
 | 15 | Startup and shutdown | schema drift, dirty WAL, interrupted scans | `tests-ts/health.test.ts`, `tests-ts/cli.test.ts`, `tests-ts/scan-lifecycle.test.ts`, `src/database.ts` | Health, schema, worker cleanup, reset, and recovery behavior are covered. The suite does not bind two real servers to test a port conflict. |
 | 16 | Mobile persistence and source collection | lost sources after reload, wrong active selection, partial import/removal, quota/schema failures, threshold regressions | `tests-ts/mobile-library.test.ts`, `tests/mobile/smoke.spec.ts`, `src/mobile/storage.ts` | IndexedDB schema v3 collection restore, v1/v2 migration, atomic import/selection/removal, failed import recovery, the exact 50 MiB boundary, over-limit 50 MiB and 8 MiB protections, and unbounded record counts are covered |
 | 17 | Mobile PWA installation and offline reading | missing shell/worker assets, invalid install metadata, network-dependent reader, discarded retained source on update | `tests/mobile/pwa.spec.ts`, `tests/mobile/smoke.spec.ts`, `playwright.mobile.config.ts`, `build-mobile.mjs`, `mobile/manifest.webmanifest`, `mobile/service-worker.js` | Emulated Pixel 7 Chromium covers the generated v5 precache and true offline reload; iPhone 13 WebKit covers network-blocked cached-shell fetch and fresh IndexedDB restore because Playwright WebKit cannot commit a blocked reload. Both cover source selection, Scan progress, reader fidelity, touch layout, independent removal, and network-free source-specific reader data |
@@ -43,9 +43,9 @@ responses, source spans, ordered Tag pairs, and GameDocument payloads.
 
 ## Browser Matrix
 
-`npm run test:browser` runs the desktop Library and Reader in Playwright
-Chromium. `npm run test:mobile` runs the standalone PWA in emulated Pixel 7
-Chromium and iPhone 13 WebKit contexts. Chromium uses true offline emulation
+`npm run test:wide` runs the mobile PWA through the Node server in Playwright
+Desktop Chromium. `npm run test:mobile` runs the standalone PWA in emulated Pixel
+7 Chromium and iPhone 13 WebKit contexts. Chromium uses true offline emulation
 for reload. Playwright WebKit cannot commit a page reload/navigation while its
 network is blocked, so its equivalent gate fetches the cached shell through the
 service worker and creates a fresh IndexedDB Mobile Library reader in the
@@ -64,5 +64,4 @@ release build.
 - LIKE-based search is the upgrade path to FTS5 for very large indexes.
 - The reader is Chessable-like but does not include move training, spaced
   repetition, or per-chapter progress tracking.
-- The desktop browser suite does not include the mobile large-document yielding
-  scenario or a real port-conflict test.
+- The release gate does not bind two real servers to test a port conflict.

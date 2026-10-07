@@ -42,8 +42,8 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
   app.addHook("onClose", async () => library.close());
 
   app.register(fastifyStatic, {
-    root: appConfig.frontendDir,
-    prefix: "/static/",
+    root: appConfig.mobileDir,
+    prefix: "/",
   });
   app.register(fastifyMultipart);
 

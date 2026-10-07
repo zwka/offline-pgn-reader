@@ -12,7 +12,7 @@ export type AppConfig = {
   version: string;
   debug: boolean;
   maxGameBytes: number;
-  frontendDir: string;
+  mobileDir: string;
   dbPath: string;
   watchDirs: string[];
   uploadDir: string;
@@ -70,7 +70,7 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       8 * 1024 * 1024,
       "PGNREADER_MAX_GAME_BYTES",
     ),
-    frontendDir: fileURLToPath(new URL("../frontend/", import.meta.url)),
+    mobileDir: fileURLToPath(new URL("../mobile/", import.meta.url)),
     dbPath: resolve(dataDir, "index.sqlite3"),
     watchDirs: resolveConfiguredPaths(env.PGNREADER_WATCH_DIRS, [
       resolve(projectRoot, "samples"),
