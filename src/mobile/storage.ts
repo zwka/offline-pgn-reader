@@ -55,7 +55,6 @@ export type MobileStoredSnapshot =
 export interface MobileLibraryStorage {
   load(): Promise<MobileStoredSnapshot | null>;
   save(snapshot: MobileLibrarySnapshot): Promise<void>;
-  clear(): Promise<void>;
 }
 
 export class MobileStorageError extends Error {
@@ -135,35 +134,6 @@ export class IndexedDbMobileStorage implements MobileLibraryStorage {
       try {
         transaction = database.transaction(STORE_NAME, "readwrite");
         const request = transaction.objectStore(STORE_NAME).put(snapshot, ACTIVE_RECORD_KEY);
-        request.onerror = () => fail(request.error);
-        transaction.oncomplete = () => {
-          if (settled) return;
-          settled = true;
-          resolve();
-        };
-        transaction.onerror = () => fail(transaction.error);
-        transaction.onabort = () => fail(transaction.error ?? new Error("transaction aborted"));
-      } catch (error) {
-        fail(error);
-      }
-    });
-  }
-
-  async clear(): Promise<void> {
-    const database = await this.openDatabase();
-    await new Promise<void>((resolve, reject) => {
-      let settled = false;
-      let transaction: IDBTransaction;
-
-      const fail = (error: unknown): void => {
-        if (settled) return;
-        settled = true;
-        reject(storageError("Could not clear the Mobile Library", error));
-      };
-
-      try {
-        transaction = database.transaction(STORE_NAME, "readwrite");
-        const request = transaction.objectStore(STORE_NAME).delete(ACTIVE_RECORD_KEY);
         request.onerror = () => fail(request.error);
         transaction.oncomplete = () => {
           if (settled) return;

@@ -86,7 +86,7 @@ describe("Library Scan lifecycle", () => {
       worker = new ManualWorker();
       return worker;
     };
-    const { directory, sourcePath, index, service } = testLibrary(workerFactory);
+    const { sourcePath, index, service } = testLibrary(workerFactory);
     const file = service.registerFile(sourcePath, false);
 
     expect(service.startScan(file.id)).toBe(true);
@@ -170,7 +170,7 @@ describe("Library Scan lifecycle", () => {
       workers.push(worker);
       return worker;
     };
-    const { directory, sourcePath, index, service } = testLibrary(workerFactory);
+    const { sourcePath, index, service } = testLibrary(workerFactory);
     const file = service.registerFile(sourcePath, false);
 
     const waiting = service.scanFileSync(file.id, true);

@@ -144,7 +144,6 @@ setReaderMode(false);
 renderSourceList(library.sources);
 renderSource(library.source);
 renderGames();
-void library.ready();
 
 function renderSourceList(sources: MobileSourceRecord[]): void {
   sourceListSummary.textContent = sources.length === 0

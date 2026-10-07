@@ -251,7 +251,6 @@ class MemoryMobileStorage implements MobileLibraryStorage {
   snapshot: MobileStoredSnapshot | null = null;
   loadError: Error | null = null;
   saveError: Error | null = null;
-  clearError: Error | null = null;
   saveGate: Promise<void> | null = null;
 
   async load(): Promise<MobileStoredSnapshot | null> {
@@ -263,11 +262,6 @@ class MemoryMobileStorage implements MobileLibraryStorage {
     if (this.saveError) throw this.saveError;
     if (this.saveGate) await this.saveGate;
     this.snapshot = snapshot;
-  }
-
-  async clear(): Promise<void> {
-    if (this.clearError) throw this.clearError;
-    this.snapshot = null;
   }
 }
 

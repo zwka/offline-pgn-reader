@@ -149,7 +149,7 @@ describe("PGN source intake", () => {
   it("rejects missing and non-PGN sources with the error envelope", async () => {
     const watchDirectory = mkdtempSync(join(tmpdir(), "offline-pgn-reader-watch-"));
     testDirectories.push(watchDirectory);
-    const source = sourceFixture(watchDirectory);
+    sourceFixture(watchDirectory);
     const server = testServer(watchDirectory);
     servers.push(server);
 

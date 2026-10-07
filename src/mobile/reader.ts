@@ -1,5 +1,5 @@
-import type { GameDocument, GameNode, TagPair } from "../wire.js";
-import { createBoard, renderBoard, type MobileBoard } from "./reader-board.js";
+import type { GameDocument, TagPair } from "../wire.js";
+import { createBoard, renderBoard } from "./reader-board.js";
 import { buildNotation, revealToken, type MobileNotation } from "./reader-notation.js";
 
 export type MobileReaderOptions = {

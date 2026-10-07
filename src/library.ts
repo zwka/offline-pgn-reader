@@ -78,7 +78,7 @@ export class LibraryService {
     private readonly index: Index,
     private readonly watchDirs: string[],
     private readonly uploadDir: string,
-    private readonly maxGameBytes = DEFAULT_MAX_GAME_BYTES,
+    maxGameBytes = DEFAULT_MAX_GAME_BYTES,
     options: LibraryServiceOptions = {},
   ) {
     this.workerFactory = options.workerFactory ?? defaultScanWorker;
