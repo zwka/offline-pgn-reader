@@ -1,10 +1,12 @@
-# Validation Report — current release gate (2026-10-02)
+# Validation report for the current release gate (2026-10-07)
 
-The final gate is `npm run test:all`: TypeScript type checking, Vitest,
-TypeScript behavior contracts, and Playwright browser tests. TypeScript is the
-sole runtime and verification authority. The contract suite uses the shared PGN
-source fixtures and checks the observable behavior of the Index, SQLite schema,
-HTTP wire responses, source spans, ordered Tag pairs, and GameDocument payloads.
+The final gate is `npm run test:all`. It starts with the documentation checker,
+then runs TypeScript type checking, Vitest, TypeScript behavior contracts, and
+Playwright browser tests. Node.js is the sole server-side production runtime.
+The desktop browser client remains vanilla JavaScript, and the mobile build
+emits browser JavaScript. The contract suite uses the shared PGN source fixtures
+and checks the observable behavior of the Index, SQLite schema, HTTP wire
+responses, source spans, ordered Tag pairs, and GameDocument payloads.
 
 ## Validation Areas
 
@@ -12,7 +14,7 @@ HTTP wire responses, source spans, ordered Tag pairs, and GameDocument payloads.
 |---|---|---|---|---|
 | 1 | PGN header extraction | escaped quotes, non-roster tags, tag order loss | `tests-ts/scanner.test.ts`, `tests-ts/games.test.ts` | TypeScript tests preserve ordered Tag pairs and extras |
 | 2 | Game boundary detection | fake tags inside comments, headers-only games, tagless movetext | `tests-ts/scanner.test.ts` | TypeScript scanner tests cover brace state, headers-only records, and warnings |
-| 3 | Large-file indexing | memory blow-up, quadratic scans | `tests-ts/scanner.test.ts`, `tests-ts/benchmark.test.ts`, `docs/benchmarks/typescript-scan.md` | One-pass scanner and repeatable production benchmark |
+| 3 | Large-file indexing | memory blow-up, quadratic scans | `tests-ts/scanner.test.ts`, `tests-ts/benchmark.test.ts`, `benchmarks/scan.ts`, `docs/benchmarks/typescript-scan.md` | TypeScript tests cover one-pass scanner behavior. `npm run benchmark` measures production-scale time, memory, and offset correctness separately from `npm run test:all`. |
 | 4 | Offset-based retrieval | stale offsets after edits, span corruption, read races | `tests-ts/games.test.ts`, `tests-ts/source.test.ts`, `tests-ts/source-race.test.ts`, `tests-ts/scan.test.ts` | Fingerprints and bounded span checks protect source reads |
 | 5 | SAN parsing | illegal moves, nonstandard move numbers | `tests-ts/hydration.test.ts`, `tests-ts/games.test.ts` | Legal prefixes remain readable and warnings are retained |
 | 6 | Comment preservation | multi-line comments, semicolon comments | `tests-ts/hydration.test.ts`, `tests-ts/games.test.ts` | Parsed comments and indexed source text remain available |
@@ -22,11 +24,12 @@ HTTP wire responses, source spans, ordered Tag pairs, and GameDocument payloads.
 | 10 | Malformed PGN tolerance | garbage tokens, broken records | `tests-ts/hydration.test.ts`, `tests-ts/scan.test.ts` | Neighboring records remain readable and warnings are surfaced |
 | 11 | File re-scan | missed changes, failed replacement, interrupted scans | `tests-ts/index.test.ts`, `tests-ts/scan.test.ts`, `tests-ts/scan-lifecycle.test.ts`, `tests-ts/cli.test.ts` | Fingerprint, replacement, retry, and lifecycle protections are covered |
 | 12 | Browser compatibility | local assets, source intake, reader workflows | `tests/browser/smoke.spec.ts`, `playwright.config.ts` | Desktop Chromium covers Library, multiple sources, game list, reader, source, graphics, variations, removal, and reset |
-| 13 | Notation rendering | variation context loss, comment blobs, large trees | `tests/browser/smoke.spec.ts`, `frontend/notation.js` | Reader rendering and chunked large-document updates are covered |
+| 13 | Notation rendering | variation context loss, comment blobs, large trees | `tests/browser/smoke.spec.ts`, `tests/mobile/smoke.spec.ts`, `frontend/notation.js` | Desktop Reader rendering is covered. The explicit large-document yielding test runs in the mobile client. |
 | 14 | Navigation correctness | wrong sibling cycling, dead ends | `tests/browser/smoke.spec.ts`, `tests/fixtures/variations.pgn` | Keyboard navigation follows the GameDocument tree |
-| 15 | Startup and shutdown | port conflicts, schema drift, dirty WAL | `tests-ts/health.test.ts`, `tests-ts/cli.test.ts`, `tests-ts/scan-lifecycle.test.ts`, `src/database.ts` | Health, schema, worker cleanup, reset, and recovery behavior are covered |
+| 15 | Startup and shutdown | schema drift, dirty WAL, interrupted scans | `tests-ts/health.test.ts`, `tests-ts/cli.test.ts`, `tests-ts/scan-lifecycle.test.ts`, `src/database.ts` | Health, schema, worker cleanup, reset, and recovery behavior are covered. The suite does not bind two real servers to test a port conflict. |
 | 16 | Mobile persistence and source collection | lost sources after reload, wrong active selection, partial import/removal, quota/schema failures, threshold regressions | `tests-ts/mobile-library.test.ts`, `tests/mobile/smoke.spec.ts`, `src/mobile/storage.ts` | IndexedDB schema v3 collection restore, v1/v2 migration, atomic import/selection/removal, failed import recovery, the exact 50 MiB boundary, over-limit 50 MiB and 8 MiB protections, and unbounded record counts are covered |
 | 17 | Mobile PWA installation and offline reading | missing shell/worker assets, invalid install metadata, network-dependent reader, discarded retained source on update | `tests/mobile/pwa.spec.ts`, `tests/mobile/smoke.spec.ts`, `playwright.mobile.config.ts`, `build-mobile.mjs`, `mobile/manifest.webmanifest`, `mobile/service-worker.js` | Emulated Pixel 7 Chromium covers the generated v5 precache and true offline reload; iPhone 13 WebKit covers network-blocked cached-shell fetch and fresh IndexedDB restore because Playwright WebKit cannot commit a blocked reload. Both cover source selection, Scan progress, reader fidelity, touch layout, independent removal, and network-free source-specific reader data |
+| 18 | Documentation freshness | broken local links, unknown npm scripts, stale generated cache or recognized current-schema claims | `npm run check:docs`, `scripts/check-docs.mjs` | The checker scans all repository Markdown files without network access and runs first in the complete release gate |
 
 ## Behavior Contracts
 
@@ -35,8 +38,8 @@ HTTP wire responses, source spans, ordered Tag pairs, and GameDocument payloads.
 | PGN source and Scan | `npm run test:contracts` | `contract_manifest.json` sources are scanned and checked through the HTTP and Index layers |
 | SQLite Index | `tests-ts/contracts.test.ts` | Schema version 1, table columns, indexed fields, and source counts are checked |
 | HTTP compatibility | `wire_contract.json` and `error_contract.json` | Health, route errors, wire casing, and error envelopes are checked |
-| Full gate | `npm run test:all` | Typecheck, Vitest, behavior contracts, and Playwright run together |
-| Production process | `npm start` / `src/main.ts` | Node.js/TypeScript is the sole production process |
+| Full gate | `npm run test:all` | Documentation check, typecheck, Vitest, behavior contracts, and Playwright run together |
+| Production process | `npm start` / `src/main.ts` | Node.js runs the sole server-side production process |
 
 ## Browser Matrix
 
@@ -61,3 +64,5 @@ release build.
 - LIKE-based search is the upgrade path to FTS5 for very large indexes.
 - The reader is Chessable-like but does not include move training, spaced
   repetition, or per-chapter progress tracking.
+- The desktop browser suite does not include the mobile large-document yielding
+  scenario or a real port-conflict test.

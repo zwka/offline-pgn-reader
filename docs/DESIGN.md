@@ -1,6 +1,6 @@
-# Offline PGN Reader — Design & Architecture Record
+# Offline PGN Reader design and architecture record
 
-Status: current · Updated: 2026-10-02 · Audience: solo maintainer
+Status: current. Updated: 2026-10-07. Audience: solo maintainer.
 
 ---
 
@@ -19,7 +19,7 @@ Status: current · Updated: 2026-10-02 · Audience: solo maintainer
 - Change detection (fingerprint) and re-scan; per-game malformed-record tolerance.
 - Raw-source PGN view/export per game (original bytes preserved via offsets while the source fingerprint matches).
 - `[%cal]` arrow and `[%csl]` square-highlight graphics on the board.
-- Structured logging, health endpoint, scan progress reporting, schema-versioned cache.
+- Structured logging, health endpoint, scan progress reporting, and a schema-versioned Index.
 
 **Out of scope (v1)** — documented as upgrades: engine analysis, move training/spaced repetition,
 PGN editing/writing, opening-tree aggregation across games, multi-user, and full-text comment
@@ -35,15 +35,17 @@ search.
 - On the desktop index path, "Large" means multi-hundred-MB files / millions of games; individual
   games stay small enough (< a few MB) to hydrate eagerly once selected. The mobile path accepts
   sources up to 50 MiB and GameDocument spans up to 8 MiB.
-- Node.js 24.11.1 and npm 11.6.0 are the documented production setup (the package accepts
-  Node.js `>=22.14.0 <27`). Chromium is used for browser verification.
+- The repository records Node.js 24.11.1 in `.nvmrc` and npm 11.6.0 in
+  `package.json`. The package accepts Node.js `>=22.14.0 <27` and npm `>=11 <12`.
+  Desktop browser verification uses Playwright Chromium. Mobile verification uses
+  emulated Pixel 7 Chromium and iPhone 13 WebKit.
 
 ## 3. Architecture decisions (ADR)
 
 | Decision | Choice | Rationale / trade-off |
 |---|---|---|
 | Web framework | **Fastify** | Typed route seams via TypeBox, low-overhead local HTTP, multipart/static plugins, and one Node process for production. |
-| Index store | **SQLite** (WAL), owned by `src/index.ts` | Zero-ops, single file in `data/`, fast enough for millions of rows, trivially backed up. `Index` owns registration, queries, status, tags, neighbors, transactional replacement, and reset; `src/database.ts` owns schema and connection lifecycle. The cache is schema-versioned and rebuildable from source PGNs at any time. |
+| Index store | **SQLite** (WAL), owned by `src/index.ts` | Zero-ops, single file in `data/`, fast enough for millions of rows, trivially backed up. `Index` owns registration, queries, status, tags, neighbors, transactional replacement, and reset; `src/database.ts` owns schema and connection lifecycle. The Index is schema-versioned and rebuildable from source PGNs at any time. |
 | PGN parsing | **Two-layer: custom streaming scanner for indexing + chess.js for hydration** | chess.js supplies the production SAN/RAV/NAG/FEN implementation while the scanner remains movetext-free for large indexes. |
 | Board state | **Server computes FEN per node during hydration** | UI never replays moves; every node carries its position. Costs response size (~100 bytes/node), saves all client-side chess logic and repeated recomputation. |
 | Frontend | **Desktop: vanilla ES modules with no build step; mobile: compiled static modules** | One dev, offline, no framework runtime. The desktop board uses locally vendored CBurnett SVG pieces and inline graphics overlays; the mobile build vendors the same pieces and its chess modules. |
@@ -99,7 +101,7 @@ source fingerprint matches.
   opening); all ordered Tag pairs, including duplicates, are kept in `tag_json`. Dedicated
   columns project the last value for a repeated tag. Search is `LIKE` over white, black, event,
   site, opening, ECO, and date (FTS5 is a documented upgrade).
-- Schema version lives in `meta`; on mismatch the DB is rebuilt (it is a cache).
+- Schema version lives in `meta`; on mismatch the derived Index database is rebuilt.
 - A process restart changes an interrupted `scanning` row to `pending`; a later scan retries from
   the source. A failed replacement transaction leaves the previous game rows available, while
   the file record is marked `error`.
@@ -171,20 +173,22 @@ Desktop uses these hash routes:
   Reset controls.
 - `#/file/{id}` — game table (Event/Site/Date/Round/White/Black/Result), search box, paging.
 - `#/game/{id}` — reader: board (left) + notation pane (right) + header strip + raw-PGN drawer.
-  Keyboard: `←`/`→` step within current line, `↑`/`↓` cycle sibling variations at a branch point,
-  `Home`/`End`, click any move token. Comments render as prose blocks in the notation flow;
+  Keyboard: `←`/`→` step within the current Variation, `↑`/`↓` cycle sibling variations at a branch point,
+  `Home` returns to the game root, `End` goes to the end of the current Variation, and clicking a move token
+  selects it. Comments render as prose blocks in the notation flow;
   sidelines as indented, bordered sub-blocks (collapsible at depth ≥ 3); NAG glyphs attach to
   their move token. Current node highlighted and kept scrolled into view. The board uses local
   CBurnett SVG pieces and renders `[%cal]`/`[%csl]` graphics.
-- `/mobile/` — standalone static client: choose `.pgn` sources with case-insensitive unique
-  Source names, restore or remove retained sources, select the active source, and use each
-  source's optional Continue action to open its Resume bookmark from the starting position. It
-  watches Scan status and progress, searches roster metadata, and pages through at most 50 Game
-  records at once without a total-count cap. Its persisted theme toggle changes the complete
-  surrounding UI palette while the standard wood square palette remains stable. In the reader,
-  control and keyboard move navigation keeps the board focused and leaves notation scroll
-  position unchanged; direct PGN token selection may scroll to that token, but reader node and
-  board state are not part of the Resume bookmark.
+- `/` in the local static setup, or `/mobile/` when a host mounts the directory under that
+  subpath, is the standalone static client. It lets you choose `.pgn` sources with
+  case-insensitive unique Source names, restore or remove retained sources, select the active
+  source, and use each source's optional Continue action to open its Resume bookmark from the
+  starting position. It watches Scan status and progress, searches roster metadata, and pages
+  through at most 50 Game records at once without a total-count cap. Its persisted theme toggle
+  changes the complete surrounding UI palette while the standard wood square palette remains
+  stable. In the reader, control and keyboard move navigation keeps the board focused and leaves
+  notation scroll position unchanged. Direct PGN token selection may scroll to that token, but
+  reader node and board state are not part of the Resume bookmark.
 
 ## 9. Performance strategy
 
@@ -199,7 +203,7 @@ Desktop uses these hash routes:
 
 ## 10. Testing strategy
 
-Vitest (`tests-ts`) and Playwright are the test layers. Synthetic fixtures in `tests/fixtures/`
+The documentation checker, Vitest (`tests-ts`), and Playwright are the verification layers. Synthetic fixtures in `tests/fixtures/`
 cover each PGN feature in isolation, while the TypeScript suite covers scanner, source-byte safety,
 hydration, Index persistence, Scan lifecycle, projection, intake, Library actions, API/wire
 contracts, configuration, CLI behavior, and the ten-fixture behavior-contract suite. The contract
@@ -209,12 +213,14 @@ nodes, source text, and route error envelopes. Playwright covers the desktop bro
 `tests/mobile` serves only the compiled static client and verifies the worker-backed Scan/list,
 versioned precache, install metadata, network-blocked reader restoration, source-scoped Resume
 bookmarks, Continue from the starting position, and browser-persistence behavior without the
-desktop server.
+desktop server. `npm run check:docs` checks the local documentation links and npm scripts used
+in the repository, the generated mobile cache name, and recognized current Mobile Library
+schema references.
 
 ## 11. Release strategy
 
 Single folder, `npm install`; the desktop production path runs via `npm start` and owns the local
-HTTP routes, filesystem-backed PGN sources, and SQLite cache. The mobile production path is the
+HTTP routes, filesystem-backed PGN sources, and SQLite Index. The mobile production path is the
 static `mobile/` directory and must be served over HTTPS on a phone; the first online load or
 installation supplies the cached shell. `src/index.ts` owns desktop persistence, `src/source.ts`
 owns desktop source-byte protection, `LibraryService` owns desktop Scan coordination, and
@@ -224,8 +230,8 @@ artifacts; `npm run build:mobile` rebuilds the mobile TypeScript output, vendore
 pieces, and service-worker precache. The build currently uses
 `CACHE_VERSION = "v5"` and emits the matching service-worker cache; bump it in
 `build-mobile.mjs` and rebuild before publishing a release.
-The full release gate is `npm run test:all`; the mobile-specific gate is
-`npm run test:mobile`. `data/` is disposable cache — backup is optional,
+The full release gate is `npm run test:all`; it starts with `npm run check:docs`. The
+mobile-specific gate is `npm run test:mobile`. `data/` contains disposable Index data. Backup is optional,
 rebuild is one command.
 CHANGELOG.md tracks releases; schema version bump ⇒ automatic rebuild.
 

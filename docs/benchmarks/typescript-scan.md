@@ -24,9 +24,9 @@ for automation.
   short movetext line. Each record is generated in batches and written to disk;
   the source is never held as one in-memory string.
 - A child Node process registers the source in a fresh SQLite `Index` and calls
-  `LibraryService.scanFileSync`, the same synchronous production path used by
-  the `index` CLI command. The benchmark wall clock starts immediately before
-  that call and stops after it returns.
+  `LibraryService.scanFileSync`, the foreground production path used by the
+  `index` CLI command. The benchmark wall clock starts immediately before that
+  call and stops after it returns.
 - Peak memory is the child process maximum resident set size from
   `process.resourceUsage().maxRSS`. On macOS, the POSIX value is converted from
   KiB to bytes. It includes Node and SQLite startup, which is stated explicitly
@@ -37,12 +37,14 @@ for automation.
 
 ## Measured Result
 
-Run date: 2026-08-09
+Run date: 2026-10-07
+Commit: `c2b6e6fbcb3eee6c7021ca7b63d65466f1df1435`
+Run count: 1
 
 Conditions:
 
 - macOS 26.5.2 arm64 on a MacBookAir10,1
-- Node.js `v26.7.0`, npm `11.19.0`
+- Node.js `v26.10.0`, npm `11.19.1`
 - package engine range: Node.js `>=22.14.0 <27`
 - generated source: 1,000,000 games, 164 bytes per record
 - isolated SQLite `Index`; source generation and verification are outside the
@@ -60,13 +62,13 @@ Measured output:
 TypeScript production Scan benchmark
 source: generated PGN, 1,000,000 games, 164 bytes/game, 156.4 MiB
 Library data: isolated temporary SQLite Index
-wall-clock time: 12.064 s
-peak RSS: 147.6 MiB
+wall-clock time: 14.094 s
+peak RSS: 181.0 MiB
 scanned game count: 1,000,000
 source-offset correctness: PASS (1,000,000/1,000,000 Index rows)
 Index records: PASS (1,000,000/1,000,000 expected records)
 source-byte spans: PASS (3/3 sampled first/middle/last spans)
-throughput: 13.0 MiB/s, 82,892 games/s
+throughput: 11.1 MiB/s, 70,953 games/s
 temporary data: removed
 ```
 

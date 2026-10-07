@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Documentation check**: `npm run check:docs` checks the local Markdown links
+  and npm scripts used in the repository, the generated mobile cache name, and
+  recognized current Mobile Library schema references. It runs first in
+  `npm run test:all`.
 - **Mobile Resume bookmarks**: each retained source now remembers the latest
   successfully opened Game record, persists that bookmark with the active-source
   selection, and offers Continue from the Game record's starting position.
@@ -26,13 +30,15 @@
   8 MiB, while the 50-record page size does not cap the total record count. The
   current snapshot schema is v3; v1 and v2 snapshots migrate on restore without
   inventing Resume bookmarks.
-- **Runtime cleanup**: the former Python/FastAPI rollback runtime was removed;
-  TypeScript is the sole production runtime and verification authority.
+- **Runtime cleanup**: the former Python/FastAPI rollback runtime was removed.
+  Node.js is the sole server-side production runtime, and TypeScript owns the
+  server implementation and verification suite. The desktop browser client
+  remains vanilla JavaScript.
 
 ## 1.1.0 — 2026-08-09
 
 - **TypeScript production cutover**: `npm start` now launches the Fastify /
-  TypeScript server and owns the browser routes and SQLite cache. During the
+  TypeScript server and owns the browser routes and SQLite Index. During the
   cutover, the Python / FastAPI implementation was retained only for rollback
   and oracle validation.
 - **Parity and recovery contracts**: cross-runtime fixtures cover scan offsets,
@@ -70,7 +76,7 @@ Initial release.
 
 - Streaming PGN indexer with exact byte offsets, brace-comment-aware game
   boundary detection, BOM/CRLF tolerance, and per-game malformed-record
-  warnings (schema v1 SQLite cache, WAL).
+  warnings (SQLite Index schema v1, WAL).
 - Per-game hydration via python-chess into an explicit move-tree document
   model: comments, starting comments, NAGs (+ glyph rendering), recursive
   variations, per-node FEN, FEN/SetUp starting positions.

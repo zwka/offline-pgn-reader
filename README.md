@@ -158,7 +158,7 @@ the original source text.
 |---|---|
 | `Right` / `Left` | Next / previous move in the current Variation |
 | `Down` / `Up` | Cycle through alternate Variations at the current position |
-| `Home` / `End` | Go to the start / end of the current Variation |
+| `Home` / `End` | Go to the game start / end of the current Variation |
 | `[` / `]` | Open the previous / next game in the source |
 | `f` | Flip the board |
 | `p` | Show or hide the Raw PGN source |
@@ -282,6 +282,7 @@ Run these commands from the project folder:
 | Start the development server | `npm run dev` |
 | Typecheck and build generated artifacts | `npm run build` |
 | Build the mobile client | `npm run build:mobile` |
+| Check documentation links and generated claims | `npm run check:docs` |
 | Run the complete release gate | `npm run test:all` |
 | Test the mobile client | `npm run test:mobile` |
 
@@ -345,6 +346,7 @@ browser interface; the mobile client is a separately compiled static build. Run
 the checks with:
 
 ```bash
+npm run check:docs
 npm run build
 npm run typecheck
 npm test
@@ -385,11 +387,16 @@ src/scan-worker.ts   Background Scan worker adapter
 src/index.ts         Index persistence, replacement, reset, and status
 src/source.ts        Source fingerprints and bounded source-byte spans
 src/projection.ts    Index/GameDocument response projection and errors
-src/scanner.ts       Streaming game-boundary scanner
+src/scan.ts          Platform-neutral streaming game-boundary scanner
+src/scanner.ts       Filesystem-facing scanner adapter
+src/main.ts          TypeScript CLI entry point
 src/hydration.ts     Per-game hydration through chess.js
 src/database.ts      SQLite schema and connection lifecycle
 tests/               Shared PGN sources and contract fixtures
 tests-ts/            TypeScript behavior and integration tests
+tests/browser/       Desktop Playwright tests
+tests/mobile/        Mobile Playwright tests
+scripts/check-docs.mjs Documentation consistency checker
 ```
 
 ## Known limitations
