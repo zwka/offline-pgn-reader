@@ -73,7 +73,7 @@
 - **Production TypeScript Scan benchmark**: the generated-source production
   path indexed 1,000,000 records in 12.064 s at 147.6 MiB peak RSS on the
   recorded arm64 macOS run; all Index rows, offsets, and sampled source spans
-  verified successfully. See [the benchmark report](docs/benchmarks/typescript-scan.md).
+  verified successfully. See [the benchmark implementation](benchmarks/scan.ts).
 
 ## 1.0.0 — 2026-07-09
 

@@ -175,7 +175,7 @@ the original source text.
 
 - Large PGN sources are scanned in one pass with bounded memory. The server
   Index stores game locations and tag pairs so opening one game does not
-  require reading the whole source again. See [the scan benchmark report](docs/benchmarks/typescript-scan.md).
+  require reading the whole source again. See [the scan benchmark implementation](benchmarks/scan.ts).
 - Source fingerprints detect changes. The server marks a changed source `stale`
   until you rescan it. An unchanged source can skip a repeated Scan.
 
@@ -375,9 +375,10 @@ The production Scan benchmark can be run with:
 npm run benchmark -- --games 1000000
 ```
 
-See [docs/DESIGN.md](docs/DESIGN.md) for the architecture record and
-[docs/VALIDATION.md](docs/VALIDATION.md) for the validation report. The main
-source areas are:
+The current architecture decisions are in [ADR 0002](docs/adr/0002-typescript-only-runtime.md)
+and [ADR 0003](docs/adr/0003-mobile-pwa-as-sole-browser-client.md). The [mobile
+verification workflow](.agents/skills/verify/SKILL.md) covers browser checks.
+The main source areas are:
 
 ```
 mobile/               Sole static browser client and generated build

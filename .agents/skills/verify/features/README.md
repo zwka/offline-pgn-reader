@@ -6,7 +6,7 @@ This directory is the maintained map for the browser PWA's user-facing behavior.
 
 - Run commands from the repository root with Node.js `>=22.14.0 <27` and npm `>=11 <12`.
 - Install the Chromium browser once with `npx playwright install chromium`. Install WebKit with `npx playwright install webkit` when running the `ios-webkit` project.
-- The mobile Playwright config builds `mobile/dist/` and serves `mobile/` over HTTP for each test run.
+- The mobile Playwright config builds `mobile/dist/` and starts one mobile server for the full test run. `reuseExistingServer: false` prevents Playwright from reusing an already-running server.
 - Each Playwright test gets a fresh browser context. The Mobile Library and service-worker cache do not share state across tests.
 - The PWA has no sign-in, seed data, or dependency on the Node API. Feature tests import their own PGN data through the browser file input.
 - Port `8763` is reserved for the mobile suite by default. Set `PGNREADER_MOBILE_TEST_PORT` to a free port for concurrent runs.
@@ -19,7 +19,6 @@ This directory is the maintained map for the browser PWA's user-facing behavior.
 - Run the exact Playwright command in the chosen feature file. Preserve `--trace on`, the feature-specific `--output` path, and the selected project.
 - Prefer the accessible button names and stable IDs or `data-action` selectors recorded in the tests.
 - Wait on Playwright expectations for statuses and rendered state. Do not replace them with fixed sleeps.
-- Each test starts its own server with `reuseExistingServer: false`. Run tests sequentially when they use the default port.
 
 ## Proof and failure reporting
 
