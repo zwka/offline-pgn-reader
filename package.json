@@ -13,6 +13,7 @@
     "build:mobile": "tsc -p tsconfig.mobile.json && node build-mobile.mjs",
     "dev": "tsx src/main.ts",
     "start": "tsx src/main.ts",
+    "serve:mobile": "tsx src/mobile-static-server.ts",
     "benchmark": "tsx benchmarks/scan.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",

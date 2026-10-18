@@ -81,11 +81,11 @@ directory over HTTP:
 
 ```bash
 npm run build:mobile
-python3 -m http.server 8431 --bind 127.0.0.1 --directory mobile
+PGNREADER_MOBILE_PORT=8431 npm run serve:mobile
 ```
 
-Open <http://127.0.0.1:8431>. The static server is only needed to load browser
-modules and workers; no Node process is needed while using the mobile client.
+Open <http://127.0.0.1:8431>. The static server only serves the PWA files. It
+does not start the application API or open the server-side SQLite Index.
 
 To open the PWA on a phone, use a temporary HTTPS Cloudflare Quick Tunnel. The
 tunnel exposes the static mobile build.
@@ -105,7 +105,7 @@ tunnel exposes the static mobile build.
    nvm use
    npm install
    npm run build:mobile
-   python3 -m http.server 8431 --bind 127.0.0.1 --directory mobile
+   PGNREADER_MOBILE_PORT=8431 npm run serve:mobile
    ```
 
    Leave this terminal running. `npm install` is needed only when the project
@@ -276,6 +276,7 @@ Run these commands from the project folder:
 | Action | Command |
 |---|---|
 | Build the browser client | `npm run build:mobile` |
+| Serve the static mobile PWA | `PGNREADER_MOBILE_PORT=8431 npm run serve:mobile` |
 | Start the local server | `npm start` |
 | Start on a chosen port | `npm start -- serve --port PORT` |
 | Scan one or more PGN sources | `npm start -- index PATH...` |

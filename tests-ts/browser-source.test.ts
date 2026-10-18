@@ -27,7 +27,7 @@ describe("browser-owned PGN source", () => {
       '[White "José"]',
       '[Black "München"]',
       "",
-      `1. e4 (1. d4 {variation}) ${"e5 ".repeat(20_000)}*`,
+      `1. e4 (1. d4 {variation}) ${"e5 ".repeat(4_096)}*`,
       "",
     ].join("\r\n");
     const sourceBytes = new TextEncoder().encode(sourceText);

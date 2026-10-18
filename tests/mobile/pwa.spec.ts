@@ -19,9 +19,14 @@ const requiredCachedAssets = [
 ];
 
 test("publishes install metadata and precaches the complete mobile build", async ({ page }) => {
+  const healthResponse = await page.request.get("/api/health");
+  expect(healthResponse.status()).toBe(404);
+
   const manifestResponse = await page.request.get("/manifest.webmanifest");
   expect(manifestResponse.ok()).toBe(true);
-  expect(manifestResponse.headers()["content-type"]).toMatch(/json/);
+  expect(manifestResponse.headers()["content-type"]).toMatch(
+    /^application\/manifest\+json(?:\s*;|$)/i,
+  );
   const manifest = await manifestResponse.json();
   expect(manifest).toMatchObject({
     name: "PGN Reader Mobile",
@@ -52,6 +57,9 @@ test("publishes install metadata and precaches the complete mobile build", async
 
   await page.goto("/");
   await waitForControlledServiceWorker(page);
+  await expect(page).toHaveTitle("PGN Reader Mobile");
+  await expect(page.locator("#source-input")).toBeVisible();
+  await expect(page.locator("#source-status")).toHaveText("idle");
   const cacheState = await page.evaluate(async () => {
     const names = await caches.keys();
     const name = names.find((candidate) => candidate.startsWith("offline-pgn-reader-mobile-"));

@@ -1,6 +1,10 @@
 import { defineConfig, devices } from "@playwright/test";
+import { parseMobileStaticServerOptions } from "./src/mobile-static.js";
 
-const port = process.env.PGNREADER_MOBILE_TEST_PORT ?? "8763";
+const { port } = parseMobileStaticServerOptions({
+  rawPort: process.env.PGNREADER_MOBILE_TEST_PORT,
+  defaultPort: 8763,
+});
 const baseURL = `http://127.0.0.1:${port}`;
 
 export default defineConfig({
@@ -24,7 +28,8 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: `npm run build:mobile && python3 -m http.server ${port} --bind 127.0.0.1 --directory mobile`,
+    command: "npm run build:mobile && npm run serve:mobile",
+    env: { PGNREADER_MOBILE_PORT: String(port) },
     url: baseURL,
     reuseExistingServer: false,
     timeout: 120_000,

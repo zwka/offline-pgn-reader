@@ -1,5 +1,4 @@
 import fastifyMultipart from "@fastify/multipart";
-import fastifyStatic from "@fastify/static";
 import { Type } from "@sinclair/typebox";
 import Fastify, { type FastifyInstance } from "fastify";
 
@@ -8,6 +7,7 @@ import { createSqliteProbe } from "./database.js";
 import { SqliteIndex } from "./index.js";
 import { LibraryService } from "./library.js";
 import { NotFound, projectErrorResponse, ServiceError } from "./projection.js";
+import { registerMobileStaticRoutes } from "./mobile-static.js";
 import {
   DiscoveredSourceSchema,
   FileRecordSchema,
@@ -41,13 +41,8 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
   });
   app.addHook("onClose", async () => library.close());
 
-  app.register(fastifyStatic, {
-    root: appConfig.mobileDir,
-    prefix: "/",
-  });
+  registerMobileStaticRoutes({ app, mobileDir: appConfig.mobileDir });
   app.register(fastifyMultipart);
-
-  app.get("/", async (_request, reply) => reply.sendFile("index.html"));
 
   app.get(
     "/api/health",
