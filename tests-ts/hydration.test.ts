@@ -344,10 +344,10 @@ describe("GameDocument hydration", () => {
       const path = resolve("tests/fixtures", fixture);
       let games = 0;
       for await (const scanned of scanPgn(path)) {
-        const source = readSourceSpan(path, scanned.offsetStart, scanned.offsetEnd, 8 * 1024 * 1024);
-        const document = hydrateGame(source, scanned.headers);
+        const sourceBytes = readSourceSpan(path, scanned.offsetStart, scanned.offsetEnd, 8 * 1024 * 1024);
+        const document = hydrateGame(sourceBytes, scanned.headers);
 
-        expect(document.source).toBe(source.toString("utf8"));
+        expect(document.source).toBe(sourceBytes.toString("utf8"));
         expect(document.headers).toEqual(scanned.headers);
         if (fixture === "malformed_middle.pgn" && scanned.idxInFile === 1) {
           expect(document.warnings.join(" ")).toContain("could not parse PGN tree");
