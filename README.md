@@ -20,7 +20,7 @@ sources are not sent to a cloud service or changed in place.
 - Node.js 24.11.1 and npm 11.x for the recommended setup. The project also
   accepts Node.js `>=22.14.0 <27` and npm `>=11 <12`.
 - A Chromium-based browser such as Chrome, Edge, or Brave.
-- One or more `.pgn` files. The project includes example sources in `samples/`.
+- One or more `.pgn` files. The repository's test fixtures are in `tests/fixtures/`.
 
 The first `npm install` downloads the software packages that run the app. The
 app itself works offline after that installation is complete.
