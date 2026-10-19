@@ -326,23 +326,37 @@ describe("GameDocument hydration", () => {
     expect(document.source).toBe(original.toString("utf8"));
   });
 
-  it("hydrates every tracked sample game without recovery warnings", async () => {
-    const samples = [
-      ["samples/Can Kabadayi - Fundamental Chess Calculation Skills.pgn", 351],
-      ["samples/Alex Banzea - The Caro-Kann Simplified.pgn", 185],
+  it("hydrates every tracked PGN fixture from its scanned source span", async () => {
+    const fixtures = [
+      ["annotations.pgn", 1],
+      ["basic_two_games.pgn", 2],
+      ["comment_trap.pgn", 2],
+      ["duplicate_tags.pgn", 1],
+      ["escape_lines.pgn", 1],
+      ["fen_start.pgn", 1],
+      ["graphics.pgn", 1],
+      ["headers_only.pgn", 2],
+      ["malformed_middle.pgn", 3],
+      ["variations.pgn", 1],
     ] as const;
 
-    for (const [path, expectedGames] of samples) {
+    for (const [fixture, expectedGames] of fixtures) {
+      const path = resolve("tests/fixtures", fixture);
       let games = 0;
-      for await (const scanned of scanPgn(resolve(path))) {
-        const document = hydrateGame(
-          readSourceSpan(resolve(path), scanned.offsetStart, scanned.offsetEnd, 8 * 1024 * 1024),
-          scanned.headers,
-        );
-        expect(document.warnings, `${path} game ${scanned.idxInFile}`).toEqual([]);
+      for await (const scanned of scanPgn(path)) {
+        const source = readSourceSpan(path, scanned.offsetStart, scanned.offsetEnd, 8 * 1024 * 1024);
+        const document = hydrateGame(source, scanned.headers);
+
+        expect(document.source).toBe(source.toString("utf8"));
+        expect(document.headers).toEqual(scanned.headers);
+        if (fixture === "malformed_middle.pgn" && scanned.idxInFile === 1) {
+          expect(document.warnings.join(" ")).toContain("could not parse PGN tree");
+        } else {
+          expect(document.warnings, `${fixture} game ${scanned.idxInFile}`).toEqual([]);
+        }
         games += 1;
       }
-      expect(games).toBe(expectedGames);
+      expect(games, fixture).toBe(expectedGames);
     }
-  }, 30_000);
+  });
 });
