@@ -56,7 +56,7 @@ function collectMarkdownFiles(repositoryRoot) {
 
   function visit(directory) {
     for (const entry of readdirSync(directory, { withFileTypes: true })) {
-      if (entry.name === ".git" || entry.name === "node_modules") continue;
+      if (entry.name === ".git" || entry.name === "node_modules" || entry.name === ".artifacts") continue;
       const absolutePath = resolve(directory, entry.name);
       if (entry.isDirectory()) {
         visit(absolutePath);
