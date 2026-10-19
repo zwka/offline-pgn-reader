@@ -46,7 +46,7 @@ test("publishes install metadata and precaches the complete mobile build", async
   const workerResponse = await page.request.get("/service-worker.js");
   expect(workerResponse.ok()).toBe(true);
   const workerSource = await workerResponse.text();
-  expect(workerSource).toContain('const CACHE_NAME = "offline-pgn-reader-mobile-v5"');
+  expect(workerSource).toContain('const CACHE_NAME = "offline-pgn-reader-mobile-v6"');
   expect(workerSource).toContain("self.skipWaiting()");
   expect(workerSource).toContain("self.clients.claim()");
   expect(workerSource).toContain("caches.delete(key)");
@@ -70,7 +70,7 @@ test("publishes install metadata and precaches the complete mobile build", async
       paths: requests.map((request) => new URL(request.url).pathname),
     };
   });
-  expect(cacheState.name).toBe("offline-pgn-reader-mobile-v5");
+  expect(cacheState.name).toBe("offline-pgn-reader-mobile-v6");
   expect(cacheState.paths).toEqual(expect.arrayContaining(requiredCachedAssets));
 });
 

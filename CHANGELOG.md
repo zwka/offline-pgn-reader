@@ -26,7 +26,7 @@
   a browser worker, lazily opens GameDocuments from retained source bytes, and
   serves an installable, versioned offline shell after its initial HTTPS load
   or installation. The current generated service-worker cache is
-  `offline-pgn-reader-mobile-v5`.
+  `offline-pgn-reader-mobile-v6`.
 - **Mobile Library safety**: the versioned IndexedDB snapshot keeps retained
   source bytes, Index data, the active-source selection, and optional
   per-source Resume bookmarks together. Imports are scanned and promoted
@@ -39,6 +39,8 @@
   separate desktop browser UI were removed. Node.js is the sole server-side
   production runtime, and TypeScript owns the server implementation and
   verification suite.
+- **Example PGNs**: the bundled course files were removed. Users select their
+  own PGN sources.
 
 ## 1.1.0 — 2026-08-09
 
