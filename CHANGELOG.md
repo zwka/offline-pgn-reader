@@ -26,7 +26,7 @@
   a browser worker, lazily opens GameDocuments from retained source bytes, and
   serves an installable, versioned offline shell after its initial HTTPS load
   or installation. The current generated service-worker cache is
-  `offline-pgn-reader-mobile-v6`.
+  `offline-pgn-reader-mobile-v7`.
 - **Mobile Library safety**: the versioned IndexedDB snapshot keeps retained
   source bytes, Index data, the active-source selection, and optional
   per-source Resume bookmarks together. Imports are scanned and promoted

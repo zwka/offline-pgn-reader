@@ -13,6 +13,7 @@ const requiredCachedAssets = [
   "/dist/vendor/pgn.js",
   "/pieces/wK.svg",
   "/pieces/bK.svg",
+  "/icons/icon-32.png",
   "/icons/icon-180.png",
   "/icons/icon-192.png",
   "/icons/icon-512.png",
@@ -46,7 +47,7 @@ test("publishes install metadata and precaches the complete mobile build", async
   const workerResponse = await page.request.get("/service-worker.js");
   expect(workerResponse.ok()).toBe(true);
   const workerSource = await workerResponse.text();
-  expect(workerSource).toContain('const CACHE_NAME = "offline-pgn-reader-mobile-v6"');
+  expect(workerSource).toContain('const CACHE_NAME = "offline-pgn-reader-mobile-v7"');
   expect(workerSource).toContain("self.skipWaiting()");
   expect(workerSource).toContain("self.clients.claim()");
   expect(workerSource).toContain("caches.delete(key)");
@@ -58,6 +59,7 @@ test("publishes install metadata and precaches the complete mobile build", async
   await page.goto("/");
   await waitForControlledServiceWorker(page);
   await expect(page).toHaveTitle("PGN Reader Mobile");
+  await expect(page.locator('link[rel="icon"]')).toHaveAttribute("href", "./icons/icon-32.png");
   await expect(page.locator("#source-input")).toBeVisible();
   await expect(page.locator("#source-status")).toHaveText("idle");
   const cacheState = await page.evaluate(async () => {
@@ -70,7 +72,7 @@ test("publishes install metadata and precaches the complete mobile build", async
       paths: requests.map((request) => new URL(request.url).pathname),
     };
   });
-  expect(cacheState.name).toBe("offline-pgn-reader-mobile-v6");
+  expect(cacheState.name).toBe("offline-pgn-reader-mobile-v7");
   expect(cacheState.paths).toEqual(expect.arrayContaining(requiredCachedAssets));
 });
 

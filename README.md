@@ -122,7 +122,7 @@ tunnel exposes the static mobile build.
 
 The build includes Android Chrome/iOS Safari manifest metadata, local icons, and
 a versioned service-worker precache. The current generated cache is
-`offline-pgn-reader-mobile-v6`. Increment `CACHE_VERSION` in
+`offline-pgn-reader-mobile-v7`. Increment `CACHE_VERSION` in
 `build-mobile.mjs` and rerun `npm run build:mobile` for a release that should
 replace the cached application shell; the Mobile Library remains in IndexedDB
 across that update. The current Mobile Library snapshot schema is v3. Snapshots
