@@ -15,6 +15,8 @@ first load.
 - A `.pgn` file to import and study.
 - Internet access to install npm packages and to load a deployed PWA for the
   first time. The PWA can work offline after that initial load.
+- To use the one-command phone installer, `cloudflared` must be installed and
+  available on `PATH`. That workflow supports macOS and Linux.
 
 The repository includes `.nvmrc` for Node.js `24.11.1`. With nvm installed, use
 `nvm install` and `nvm use` in the project directory. Otherwise, install a
@@ -63,7 +65,8 @@ npm run test:all
 
 ## 4. Production Setup
 
-The production browser app is a static PWA. Build and publish it as follows:
+The production browser app is a static PWA. For a permanent deployment, build
+and publish it as follows:
 
 1. Install dependencies and build the production files:
 
@@ -78,6 +81,32 @@ The production browser app is a static PWA. Build and publish it as follows:
 3. Open the HTTPS address in a browser while online. Import `.pgn` files from
    that browser to store them in its local library. After the first load, the
    PWA and imported library are available offline in that browser.
+
+For a quick phone install from macOS or Linux, install `cloudflared` first. On
+macOS with Homebrew:
+
+```bash
+brew install cloudflared
+```
+
+On Linux, follow [Cloudflare's installation guide](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/).
+Then run this command from the project directory:
+
+```bash
+./offline-pgn-reader --install-mobile
+```
+
+The command installs dependencies, builds the PWA, starts the static server and
+temporary HTTPS tunnel in the background, then prints the phone URL. Open that
+URL on the phone and choose **Install app** or **Add to Home Screen**. Anyone
+with the temporary URL can access the PWA files; imported PGN files remain in
+that browser's local storage.
+
+Stop the server and tunnel with:
+
+```bash
+./offline-pgn-reader --shutdown
+```
 
 The Node server and CLI are separate from the browser PWA. Run `npm start` to
 start the local API server; it does not serve the browser interface.
