@@ -87,38 +87,48 @@ PGNREADER_MOBILE_PORT=8431 npm run serve:mobile
 Open <http://127.0.0.1:8431>. The static server only serves the PWA files. It
 does not start the application API or open the server-side SQLite Index.
 
-To open the PWA on a phone, use a temporary HTTPS Cloudflare Quick Tunnel. The
-tunnel exposes the static mobile build.
+To install the PWA on a phone, install `cloudflared` once. On macOS with
+Homebrew, run:
 
-1. Install `cloudflared`. On macOS with Homebrew, run:
+```bash
+brew install cloudflared
+```
 
-   ```bash
-   brew install cloudflared
-   ```
+To install `cloudflared` on other operating systems, follow [Cloudflare's
+installation guide](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/).
+The mobile command supports macOS and Linux. Use the Node.js and npm versions
+declared in `package.json`.
 
-   For other operating systems, use the installation method in [Cloudflare's
-   `cloudflared` documentation](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/).
-2. From the project folder, install dependencies if needed, build the client,
-   and start the static server:
+From the project folder, start the mobile session:
 
-   ```bash
-   nvm use
-   npm install
-   npm run build:mobile
-   PGNREADER_MOBILE_PORT=8431 npm run serve:mobile
-   ```
+```bash
+./offline-pgn-reader --install-mobile
+```
 
-   Leave this terminal running. `npm install` is needed only when the project
-   dependencies have not been installed yet or `package-lock.json` changes.
-3. In a second terminal, start the tunnel:
+The command checks for `cloudflared`, runs `npm install` and `npm run build`,
+then starts the mobile static server and tunnel in the background. It prints a
+temporary `https://...trycloudflare.com` URL and returns to the shell. The
+server uses port `8431` by default. Set `PGNREADER_MOBILE_PORT` to use another
+port. If that port is occupied, the command exits without changing its listener.
+Cloudflare may take a short time to route requests to a new URL. A repeated start
+reuses a healthy session and URL; it replaces a stale session.
 
-   ```bash
-   cloudflared tunnel --url http://127.0.0.1:8431
-   ```
+Open the printed URL in the phone's browser, then choose **Install app** or
+**Add to Home Screen**. The tunnel serves only the static PWA files. Imported
+PGN sources stay in that browser's IndexedDB; the workspace does not receive
+them. Anyone who knows the temporary URL can access the app files.
 
-4. Open the `https://...trycloudflare.com` URL printed by `cloudflared` in the
-   phone's browser. Leave both terminals running while the phone uses the
-   tunnel. The URL is temporary and can change when the tunnel restarts.
+The server and tunnel keep running after the command returns. Stop them with:
+
+```bash
+./offline-pgn-reader --shutdown
+```
+
+Shutdown is safe to repeat. The command stores session state and logs in
+`.offline-pgn-reader/`. Shutdown removes active state and keeps the logs until
+the next fresh start. A new Quick Tunnel may have a different URL. Install the
+PWA again at that URL; its Mobile Library remains tied to the old browser origin
+and does not transfer.
 
 The build includes Android Chrome/iOS Safari manifest metadata, local icons, and
 a versioned service-worker precache. The current generated cache is
