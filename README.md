@@ -1,6 +1,6 @@
 # Offline PGN Reader
 
-## 1. Short Description
+## 1. Description
 
 Offline PGN Reader is a browser-based chess study app. Import `.pgn` files to
 search games and study their moves, comments, and variations on a chessboard.
