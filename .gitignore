@@ -7,3 +7,4 @@ test-results/
 mobile/dist/
 .benchmark-scan-*/
 .artifacts/
+.offline-pgn-reader/
